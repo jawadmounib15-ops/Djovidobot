@@ -1,54 +1,60 @@
-import yfinance as yf, requests, time, os
-from datetime import datetime
 from flask import Flask
 import threading
+import yfinance as yf
+import requests
+import time
+import os
+from datetime import datetime
 
-# Prende token da Render - accetta sia TOKEN che BOT_TOKEN
-TOKEN = os.environ.get("BOT_TOKEN") or os.environ.get("TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
-
-# Finto sito web per tenere acceso Render FREE
+# --- SITO WEB PER TENERLO SVEGLIO 24/7 ---
 app = Flask(__name__)
+
 @app.route('/')
 def home():
-    return "Bot attivo!"
+    return "Bot is running! LIVE 24/7 - DjovidoBot"
 
 def run_web():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    app.run(host='0.0.0.0', port=10000)
 
 threading.Thread(target=run_web, daemon=True).start()
+# --- FINE SITO WEB ---
 
-COPPIE = [("EURUSD=X","EUR/USD"),("GBPUSD=X","GBP/USD"),("USDJPY=X","USD/JPY")]
+TOKEN = os.environ.get("BOT_TOKEN") or os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
-def send(m):
+PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "EURJPY=X", "GBPJPY=X", "EURGBP=X"]
+NAMES = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "EUR/JPY", "GBP/JPY", "EUR/GBP"]
+
+def send_signal(pair_name, direction):
+    text = f"🔥 SEGNALE {pair_name}\n📈 {direction}\n⏰ {datetime.now().strftime('%H:%M:%S')}\n📊 Pin Bar Strategy"
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={m}")
+        requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={text}")
     except:
         pass
 
-send("✅ BOT PRE-AVVISO ATTIVO! Ti avviso 60sec prima!")
+def check_pair(pair_yf, pair_name):
+    try:
+        data = yf.download(pair_yf, period="1d", interval="1m", progress=False)
+        if len(data) < 5:
+            return
+        last = data.iloc[-1]
+        open_p = last['Open']
+        close_p = last['Close']
+        high_p = last['High']
+        low_p = last['Low']
+        body = abs(close_p - open_p)
+        upper_wick = high_p - max(open_p, close_p)
+        lower_wick = min(open_p, close_p) - low_p
 
+        if lower_wick > body * 2 and close_p > open_p:
+            send_signal(pair_name, "BUY ⬆️ CALL")
+        elif upper_wick > body * 2 and close_p < open_p:
+            send_signal(pair_name, "SELL ⬇️ PUT")
+    except Exception as e:
+        print(e)
+
+print("Bot started! 24/7 LIVE")
 while True:
-    for ticker, nome in COPPIE:
-        try:
-            df = yf.download(ticker, period="1d", interval="1m")
-            if len(df) < 10:
-                continue
-            u5 = df.tail(5)
-            o = float(u5.iloc[0]['Open'])
-            c = float(u5.iloc[-1]['Close'])
-            h = float(u5['High'].max())
-            l = float(u5['Low'].min())
-            corpo = abs(c-o)
-            if corpo == 0:
-                corpo = 0.00001
-            sotto = min(o,c) - l
-            sopra = h - max(o,c)
-            pin = sotto > corpo*2.0 and sopra < corpo*0.8
-            minuto = datetime.now().minute % 5
-            sec = datetime.now().second
-            if pin and minuto == 4 and sec >= 10:
-                send(f"⚠️ PRE-AVVISO {nome} - Pin bar!")
-        except:
-            pass
-    time.sleep(10)
+    for i in range(len(PAIRS)):
+        check_pair(PAIRS[i], NAMES[i])
+    time.sleep(60)
