@@ -1,60 +1,65 @@
+import os, gc, time, requests, yfinance as yf
 from flask import Flask
-import threading
-import yfinance as yf
-import requests
-import time
-import os
+from threading import Thread
 from datetime import datetime
 
-# --- SITO WEB PER TENERLO SVEGLIO 24/7 ---
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+SYMBOLS = {
+    "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X",
+    "USDJPY": "USDJPY=X", "AUDUSD": "AUDUSD=X",
+    "AUDJPY": "AUDJPY=X", "GBPJPY": "GBPJPY=X",
+    "USDCAD": "USDCAD=X", "NZDUSD": "NZDUSD=X",
+    "ORO": "GC=F", "BTC": "BTC-USD",
+    "NAS100": "^NDX", "EURJPY": "EURJPY=X",
+    "EURGBP": "EURGBP=X", "GBPCHF": "GBPCHF=X",
+}
+
 app = Flask(__name__)
-
 @app.route('/')
-def home():
-    return "Bot is running! LIVE 24/7 - DjovidoBot"
+def home(): return "Bot V2 LIGHT LIVE 24/7 - DjovidoBot"
 
-def run_web():
-    app.run(host='0.0.0.0', port=10000)
-
-threading.Thread(target=run_web, daemon=True).start()
-# --- FINE SITO WEB ---
-
-TOKEN = os.environ.get("BOT_TOKEN") or os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
-
-PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "EURJPY=X", "GBPJPY=X", "EURGBP=X"]
-NAMES = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "EUR/JPY", "GBP/JPY", "EUR/GBP"]
-
-def send_signal(pair_name, direction):
-    text = f"🔥 SEGNALE {pair_name}\n📈 {direction}\n⏰ {datetime.now().strftime('%H:%M:%S')}\n📊 Pin Bar Strategy"
+def send_telegram(msg):
     try:
-        requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={text}")
-    except:
-        pass
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+    except: pass
 
-def check_pair(pair_yf, pair_name):
-    try:
-        data = yf.download(pair_yf, period="1d", interval="1m", progress=False)
-        if len(data) < 5:
-            return
-        last = data.iloc[-1]
-        open_p = last['Open']
-        close_p = last['Close']
-        high_p = last['High']
-        low_p = last['Low']
-        body = abs(close_p - open_p)
-        upper_wick = high_p - max(open_p, close_p)
-        lower_wick = min(open_p, close_p) - low_p
+def is_pin_bar(o,h,l,c):
+    body = abs(c-o)
+    if body==0: return False
+    up = h - max(o,c); low = min(o,c) - l
+    if low > body*2.5 and up < body*0.8 and body < (h-l)*0.4: return "BUY"
+    if up > body*2.5 and low < body*0.8 and body < (h-l)*0.4: return "SELL"
+    return False
 
-        if lower_wick > body * 2 and close_p > open_p:
-            send_signal(pair_name, "BUY ⬆️ CALL")
-        elif upper_wick > body * 2 and close_p < open_p:
-            send_signal(pair_name, "SELL ⬇️ PUT")
-    except Exception as e:
-        print(e)
+def is_engulfing(po,pc,o,c):
+    if pc<po and c>o and c>po and o<pc and abs(c-o)>abs(pc-po)*1.2: return "BUY"
+    if pc>po and c<o and c<po and o>pc and abs(c-o)>abs(pc-po)*1.2: return "SELL"
+    return False
 
-print("Bot started! 24/7 LIVE")
-while True:
-    for i in range(len(PAIRS)):
-        check_pair(PAIRS[i], NAMES[i])
-    time.sleep(60)
+def scan():
+    send_telegram("✅ *V2 LIGHT avviato!* 14 mercati + Pin+Engulfing FORTE. Zero crash!")
+    while True:
+        for name, ticker in SYMBOLS.items():
+            try:
+                df = yf.download(ticker, period="5d", interval="1h", progress=False, auto_adjust=True)
+                if len(df)<10: 
+                    del df; continue
+                df = df.tail(50)
+                prev, last = df.iloc[-2], df.iloc[-1]
+                o,h,l,c = float(last['Open']), float(last['High']), float(last['Low']), float(last['Close'])
+                po,pc = float(prev['Open']), float(prev['Close'])
+                sig = is_pin_bar(o,h,l,c); pat = "Pin Bar FORTE" if sig else None
+                if not sig:
+                    sig = is_engulfing(po,pc,o,c); pat = "Engulfing FORTE" if sig else None
+                if sig:
+                    send_telegram(f"🚨 *{sig} {name}* | {pat}\nPrezzo: {c}\nOra: {datetime.now().strftime('%H:%M')}")
+                del df; gc.collect(); time.sleep(2)
+            except: gc.collect(); continue
+        gc.collect(); time.sleep(300)
+
+if __name__ == "__main__":
+    Thread(target=scan, daemon=True).start()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
