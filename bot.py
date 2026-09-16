@@ -3,67 +3,72 @@ import pandas as pd
 import time
 import threading
 import requests
+import os
 from flask import Flask
 
-# CONFIG
-TOKEN = "TELEGRAM_TOKEN"
-CHAT_ID = "6723819958"
-COPPIE = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "EURJPY=X", "GBPJPY=X", "EURGBP=X", "USDCAD=X", "EURCAD=X", "AUDJPY=X", "NZDUSD=X", "CADJPY=X"]
+# CONFIG SICURA - niente token scritti!
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+COPPIE = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "EURJPY=X", "EURCAD=X", "USDCHF=X", "AUDUSD=X", "EURGBP=X"]
 
 app = Flask(__name__)
-@app.route('/')
-def home(): return "V2.6 ANTI-SPAM ATTIVO"
 
-last_sent = {} # <--- ANTI SPAM
+@app.route('/')
+def home():
+    return "V2.6 ANTI-SPAM ATTIVO"
+
+last_sent = {} # <--- ANTI SPAM 45 min
 
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
-    except: pass
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
+    except:
+        pass
 
 def check_candles(pair):
     try:
-        df = yf.download(pair, period="2d", interval="15m", progress=False)
-        if len(df) < 55: return None
+        df = yf.download(pair, period="2d", interval="5m", progress=False, auto_adjust=True)
+        if len(df) < 55:
+            return None
+
         df['EMA50'] = df['Close'].ewm(span=50).mean()
         c = df.iloc[-1]
         prev = df.iloc[-2]
+
         close = float(c['Close'])
-        open_ = float(c['Open'])
         ema = float(c['EMA50'])
+        prev_close = float(prev['Close'])
 
-        # PIN BAR FORTE
-        body = abs(close - open_)
-        upper = float(c['High']) - max(close, open_)
-        lower = min(close, open_) - float(c['Low'])
+        # Filtro anti-spam
+        now = time.time()
+        if pair in last_sent and (now - last_sent[pair]) < 2700: # 45 minuti
+            return None
 
-        pin_sell = lower > body*2.5 and close < open_ and close < ema
-        pin_buy = upper > body*2.5 and close > open_ and close > ema
+        signal = None
+        if prev_close < ema and close > ema:
+            signal = f"🟢 BUY {pair.replace('=X','')} @ {close:.5f}"
+        elif prev_close > ema and close < ema:
+            signal = f"🔴 SELL {pair.replace('=X','')} @ {close:.5f}"
 
-        eng_sell = close < open_ and float(prev['Close']) > float(prev['Open']) and close < ema
-        eng_buy = close > open_ and float(prev['Close']) < float(prev['Open']) and close > ema
+        if signal:
+            last_sent[pair] = now
+            return signal
 
-        if pin_sell: return f"🔴 PIN BAR SELL - {pair}\nPrezzo sotto EMA50 - Trend DOWN"
-        if pin_buy: return f"🟢 PIN BAR BUY - {pair}\nPrezzo sopra EMA50 - Trend UP"
-        if eng_sell: return f"🔴 ENGULFING SELL - {pair}\nPrezzo sotto EMA50"
-        if eng_buy: return f"🟢 ENGULFING BUY - {pair}\nPrezzo sopra EMA50"
-    except: return None
+    except Exception as e:
+        print(f"Errore {pair}: {e}")
     return None
 
 def bot_loop():
-    send_telegram("✅ V2.6 ANTI-SPAM AVVIATO!")
     while True:
-        for pair in COPPIE:
-            sig = check_candles(pair)
-            if sig:
-                # Controllo anti-spam 30 minuti
-                now = time.time()
-                if pair not in last_sent or now - last_sent[pair] > 1800:
-                    send_telegram(f"🚨 *SEGNALE V2.6*\n\n{sig}\nTF: 15m -> Entra 30m su Pocket\nCoppia reale: {pair.replace('=X','')}")
-                    last_sent[pair] = now
+        for coppia in COPPIE:
+            msg = check_candles(coppia)
+            if msg:
+                send_telegram(msg)
         time.sleep(60)
 
+# Avvia bot in background
 threading.Thread(target=bot_loop, daemon=True).start()
 
 if __name__ == "__main__":
