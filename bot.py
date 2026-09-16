@@ -8,86 +8,100 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = {
     "EURUSD": "EURUSD=X",
-    "GBPUSD": "GBPUSD=X", "USDJPY": "USDJPY=X",
-    "AUDUSD": "AUDUSD=X", "AUDJPY": "AUDJPY=X", "GBPJPY": "GBPJPY=X",
-    "USDCAD": "USDCAD=X", "NZDUSD": "NZDUSD=X", "ORO": "GC=F",
-    "BTC": "BTC-USD", "NAS100": "^NDX", "EURJPY": "EURJPY=X",
-    "EURGBP": "EURGBP=X", "GBPCHF": "GBPCHF=X"
+    "GBPUSD": "GBPUSD=X",
+    "USDJPY": "USDJPY=X",
+    "AUDUSD": "AUDUSD=X",
+    "AUDJPY": "AUDJPY=X",
+    "GBPJPY": "GBPJPY=X",
+    "USDCAD": "USDCAD=X",
+    "NZDUSD": "NZDUSD=X",
+    "EURJPY": "EURJPY=X",
+    "EURGBP": "EURGBP=X",
+    "GBPCHF": "GBPCHF=X",
+    "CADJPY": "CADJPY=X"
 }
 
 app = Flask(__name__)
+
 @app.route('/')
-def home(): return "Bot V3.1 POCKET LIVE 24/7 - DjovidoBot - Filtri Leggeri"
+def home():
+    return "Bot V3.2 POCKET LIVE - Filtri ULTRA LEGGERI - 12 mercati reali"
 
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except: pass
+        print(f"Inviato Telegram: {msg[:30]}")
+    except Exception as e:
+        print(f"Errore Telegram: {e}")
 
 def is_pin_bar(o,h,l,c):
     body = abs(c-o)
     if body==0: return False
-    up = h - max(o,c); low = min(o,c) - l
-    if low > body*2.5 and up < body*0.8 and body < (h-l)*0.4:
+    up = h - max(o,c)
+    low = min(o,c) - l
+    if low > body*1.8 and up < body*1.2 and body < (h-l)*0.5:
         return "BUY"
-    if up > body*2.5 and low < body*0.8 and body < (h-l)*0.4:
+    if up > body*1.8 and low < body*1.2 and body < (h-l)*0.5:
         return "SELL"
     return False
 
 def is_engulfing(po,pc,o,c):
-    if pc<po and c>o and c>po and o<pc and abs(c-o)>abs(pc-po)*1.2: return "BUY"
-    if pc>po and c<o and c<po and o>pc and abs(c-o)>abs(pc-po)*1.2: return "SELL"
+    if pc<po and c>o and c>po and o<pc and abs(c-o)>abs(pc-po)*1.0:
+        return "BUY"
+    if pc>po and c<o and c<po and o>pc and abs(c-o)>abs(pc-po)*1.0:
+        return "SELL"
     return False
 
 def scan():
-    send_telegram("✅ *V3.1 POCKET AVVIATO!* 14 mercati + Pin+Engulfing + filtri leggeri. Zero crash!")
+    send_telegram("✅ *V3.2 POCKET AVVIATO!* 12 mercati reali + Pin+Engulfing + filtri ULTRA leggeri! Ora manda EURUSD!")
+    print("BOT V3.2 AVVIATO!")
     while True:
         for name, ticker in SYMBOLS.items():
             try:
                 df = yf.download(ticker, period="5d", interval="15m", progress=False, auto_adjust=True)
-                if len(df)<100:
-                    del df; continue
-                df = df.tail(100)
+                if len(df)<60:
+                    del df
+                    continue
+                df = df.tail(80)
                 df['EMA50'] = df['Close'].ewm(span=50).mean()
-                df['EMA200'] = df['Close'].ewm(span=200).mean()
                 delta = df['Close'].diff()
                 gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14).mean()
                 loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14).mean()
                 df['RSI'] = 100 - (100 / (1 + gain/loss))
-                tr = pd.concat([df['High']-df['Low'], (df['High']-df['Close'].shift()).abs(), (df['Low']-df['Close'].shift()).abs()], axis=1).max(axis=1)
-                df['ATR'] = tr.ewm(alpha=1/14).mean()
-
+                
                 prev, last = df.iloc[-2], df.iloc[-1]
                 o,h,l,c = float(last['Open']), float(last['High']), float(last['Low']), float(last['Close'])
                 po,pc = float(prev['Open']), float(prev['Close'])
-                ema50, ema200, rsi, atr = float(df['EMA50'].iloc[-1]), float(df['EMA200'].iloc[-1]), float(df['RSI'].iloc[-1]), float(df['ATR'].iloc[-1])
+                ema50 = float(df['EMA50'].iloc[-1])
+                rsi = float(df['RSI'].iloc[-1])
+                
+                if pd.isna(rsi):
+                    rsi = 50
 
-                # REGOLA 1: ATR - CORRETTA PIU LEGGERA
-                if atr/c < 0.00015:
-                    del df; gc.collect(); continue
-
-                # REGOLA 2: Vicino a S/R - CORRETTA PIU LEGGERA 0.35%
-                recent_high = df['High'].iloc[-20:-1].max()
-                recent_low = df['Low'].iloc[-20:-1].min()
-                near_sr = abs(c-recent_high)/c < 0.0035 or abs(c-recent_low)/c < 0.0035
-                if not near_sr:
-                    del df; gc.collect(); continue
-
-                sig = is_pin_bar(o,h,l,c); pat = "Pin Bar FORTE" if sig else None
+                sig = is_pin_bar(o,h,l,c)
+                pat = "Pin Bar"
                 if not sig:
-                    sig = is_engulfing(po,pc,o,c); pat = "Engulfing FORTE" if sig else None
-
+                    sig = is_engulfing(po,pc,o,c)
+                    pat = "Engulfing"
+                
                 if sig:
-                    # REGOLA 3+4: Trend + RSI - CORRETTA PIU LEGGERA PER POCKET
-                    trend_ok = (sig=="BUY" and c>ema50 and 30<rsi<75) or (sig=="SELL" and c<ema50 and 30<rsi<75)
+                    # FILTRO ULTRA LEGGERO - SOLO TREND + RSI
+                    trend_ok = (sig=="BUY" and c>ema50 and 20<rsi<80) or (sig=="SELL" and c<ema50 and 20<rsi<80)
                     if trend_ok:
-                        send_telegram(f"🚨 *{sig} {name}* | {pat}\nPrezzo: {c}\nRSI: {rsi:.1f} | EMA Trend | S/R | ATR OK\nOra: {datetime.now().strftime('%H:%M')} - TF 15m")
-
-                del df; gc.collect(); time.sleep(2)
-            except:
-                gc.collect(); continue
-        gc.collect(); time.sleep(180)
+                        msg = f"🚨 *{sig} {name}* {pat} 15m\nPrezzo: {c:.5f} | RSI {rsi:.0f}\nOra: {datetime.now().strftime('%H:%M')} | Pocket 30m"
+                        send_telegram(msg)
+                
+                del df
+                gc.collect()
+                time.sleep(1)
+            except Exception as e:
+                print(f"Errore {name}: {e}")
+                gc.collect()
+                continue
+        print(f"Scansione completa {datetime.now().strftime('%H:%M:%S')} - pausa 90s")
+        gc.collect()
+        time.sleep(90)
 
 if __name__ == "__main__":
     Thread(target=scan, daemon=True).start()
