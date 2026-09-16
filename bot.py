@@ -1,4 +1,4 @@
-import os, gc, time, requests, yfinance as yf
+import os, gc, time, requests, yfinance as yf, pandas as pd
 from flask import Flask
 from threading import Thread
 from datetime import datetime
@@ -7,18 +7,16 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = {
-    "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X",
-    "USDJPY": "USDJPY=X", "AUDUSD": "AUDUSD=X",
-    "AUDJPY": "AUDJPY=X", "GBPJPY": "GBPJPY=X",
-    "USDCAD": "USDCAD=X", "NZDUSD": "NZDUSD=X",
-    "ORO": "GC=F", "BTC": "BTC-USD",
-    "NAS100": "^NDX", "EURJPY": "EURJPY=X",
-    "EURGBP": "EURGBP=X", "GBPCHF": "GBPCHF=X",
+    "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "USDJPY=X",
+    "AUDUSD": "AUDUSD=X", "AUDJPY": "AUDJPY=X", "GBPJPY": "GBPJPY=X",
+    "USDCAD": "USDCAD=X", "NZDUSD": "NZDUSD=X", "ORO": "GC=F",
+    "BTC": "BTC-USD", "NAS100": "^NDX", "EURJPY": "EURJPY=X",
+    "EURGBP": "EURGBP=X", "GBPCHF": "GBPCHF=X"
 }
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot V2 LIGHT LIVE 24/7 - DjovidoBot"
+def home(): return "Bot V3 ULTRA FORTE LIVE 24/7 - DjovidoBot - 6 Regole"
 
 def send_telegram(msg):
     try:
@@ -40,25 +38,53 @@ def is_engulfing(po,pc,o,c):
     return False
 
 def scan():
-    send_telegram("✅ *V2 LIGHT avviato!* 14 mercati + Pin+Engulfing FORTE. Zero crash!")
+    send_telegram("✅ *V3 ULTRA FORTE avviato!* 14 mercati + Pin+Engulfing + EMA+RSI+ATR+S/R. Zero crash!")
     while True:
         for name, ticker in SYMBOLS.items():
             try:
-                df = yf.download(ticker, period="5d", interval="1h", progress=False, auto_adjust=True)
-                if len(df)<10: 
+                df = yf.download(ticker, period="5d", interval="15m", progress=False, auto_adjust=True)
+                if len(df)<100:
                     del df; continue
-                df = df.tail(50)
+                df = df.tail(100)
+                # --- 4 REGOLE FORTI NUOVE ---
+                df['EMA50'] = df['Close'].ewm(span=50).mean()
+                df['EMA200'] = df['Close'].ewm(span=200).mean()
+                delta = df['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14).mean()
+                loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14).mean()
+                df['RSI'] = 100 - (100 / (1 + gain/loss))
+                tr = pd.concat([df['High']-df['Low'], (df['High']-df['Close'].shift()).abs(), (df['Low']-df['Close'].shift()).abs()], axis=1).max(axis=1)
+                df['ATR'] = tr.ewm(alpha=1/14).mean()
+
                 prev, last = df.iloc[-2], df.iloc[-1]
                 o,h,l,c = float(last['Open']), float(last['High']), float(last['Low']), float(last['Close'])
                 po,pc = float(prev['Open']), float(prev['Close'])
+                ema50, ema200, rsi, atr = float(df['EMA50'].iloc[-1]), float(df['EMA200'].iloc[-1]), float(df['RSI'].iloc[-1]), float(df['ATR'].iloc[-1])
+
+                # REGOLA 1: ATR - no mercato morto
+                if atr/c < 0.00025:
+                    del df; gc.collect(); continue
+                # REGOLA 2: Vicino a S/R ultimi 20
+                recent_high = df['High'].iloc[-20:-1].max()
+                recent_low = df['Low'].iloc[-20:-1].min()
+                near_sr = abs(c-recent_high)/c < 0.0015 or abs(c-recent_low)/c < 0.0015
+                if not near_sr:
+                    del df; gc.collect(); continue
+
                 sig = is_pin_bar(o,h,l,c); pat = "Pin Bar FORTE" if sig else None
                 if not sig:
                     sig = is_engulfing(po,pc,o,c); pat = "Engulfing FORTE" if sig else None
+
                 if sig:
-                    send_telegram(f"🚨 *{sig} {name}* | {pat}\nPrezzo: {c}\nOra: {datetime.now().strftime('%H:%M')}")
+                    # REGOLA 3+4: Trend + RSI
+                    trend_ok = (sig=="BUY" and c>ema50 and ema50>ema200 and 40<rsi<68) or (sig=="SELL" and c<ema50 and ema50<ema200 and 32<rsi<60)
+                    if trend_ok:
+                        send_telegram(f"🚨 *{sig} {name}* | {pat}\nPrezzo: {c}\nRSI: {rsi:.1f} | EMA Trend | S/R | ATR OK\nOra: {datetime.now().strftime('%H:%M')} - TF 15m")
+
                 del df; gc.collect(); time.sleep(2)
-            except: gc.collect(); continue
-        gc.collect(); time.sleep(300)
+            except:
+                gc.collect(); continue
+        gc.collect(); time.sleep(180)
 
 if __name__ == "__main__":
     Thread(target=scan, daemon=True).start()
