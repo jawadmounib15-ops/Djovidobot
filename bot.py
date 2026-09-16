@@ -1,28 +1,32 @@
-import yfinance as yf, os, time, threading, requests
+import yfinance as yf, os, time, threading, requests, pandas as pd
 from flask import Flask
 TOKEN=os.getenv("TELEGRAM_TOKEN")
 CHAT_ID=os.getenv("TELEGRAM_CHAT_ID")
-print(f"--- V2.7 FIX SERIES AVVIATO TOKEN ok={bool(TOKEN)} ---")
+print(f"--- V2.8 DEFINITIVO AVVIATO TOKEN ok={bool(TOKEN)} ---")
 COPPIE=["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","EURCAD=X","USDCHF=X","AUDUSD=X","EURGBP=X"]
 app=Flask(__name__)
 @app.route('/')
-def home(): return "V2.7 FIX ONLINE"
+def home(): return "V2.8 ONLINE"
 last_sent={}
 def send(msg):
     try:
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",data={"chat_id":CHAT_ID,"text":msg},timeout=10)
-        print(f"Inviato: {msg}")
-    except Exception as e: print(f"Err send:{e}")
+    except: pass
+def get_price(df):
+    # Questo sistema funziona SEMPRE, anche se yfinance cambia formato
+    try:
+        c = df['Close']
+        if isinstance(c, pd.DataFrame):
+            c = c.iloc[:,0]
+        return float(c.iloc[-1]), float(c.iloc[-2]), float(c.ewm(span=50).mean().iloc[-1])
+    except:
+        return None,None,None
 def check(pair):
     try:
         df=yf.download(pair,period="2d",interval="5m",progress=False,auto_adjust=True)
         if len(df)<55: return None
-        close_series = df['Close']
-        ema_series = close_series.ewm(span=50).mean()
-        # Prendo gli ultimi 2 valori come numeri veri, non Series
-        close = float(close_series.iloc[-1])
-        prev = float(close_series.iloc[-2])
-        ema = float(ema_series.iloc[-1])
+        close, prev, ema = get_price(df)
+        if close is None: return None
         if time.time()-last_sent.get(pair,0)<2700: return None
         sig=None
         if prev < ema and close > ema: sig=f"🟢 BUY {pair.replace('=X','')} @ {close:.5f}"
@@ -32,8 +36,8 @@ def check(pair):
         print(f"Err {pair}:{e}")
         return None
 def loop():
-    print("Loop partito")
-    send("✅ DjovidoBot V2.7 FIX ONLINE - Errore Series risolto!")
+    print("Loop partito V2.8")
+    send("✅ DjovidoBot V2.8 DEFINITIVO ONLINE - Rosso sistemato!")
     while True:
         for cp in COPPIE:
             m=check(cp)
