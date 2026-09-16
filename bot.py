@@ -1,66 +1,53 @@
-import os, gc, time, requests, yfinance as yf, pandas as pd
+import os, time, threading, requests, yfinance as yf, pandas as pd
 from flask import Flask
-from threading import Thread
-from datetime import datetime
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-SYMBOLS = {
-    "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "USDJPY=X",
-    "AUDUSD": "AUDUSD=X", "AUDJPY": "AUDJPY=X", "GBPJPY": "GBPJPY=X",
-    "USDCAD": "USDCAD=X", "NZDUSD": "NZDUSD=X", "EURJPY": "EURJPY=X",
-    "EURGBP": "EURGBP=X", "GBPCHF": "GBPCHF=X", "CADJPY": "CADJPY=X"
-}
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","GBPJPY=X","CADJPY=X","EURGBP=X","AUDJPY=X","GBPCHF=X","EURCAD=X"]
+TIMEFRAME = "15m"
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot V3.2 POCKET LIVE - 12 REALI"
+def home(): return "Bot V2.5 REAL LIVE - DjovidoBot"
 
 def send_telegram(msg):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def is_pin_bar(o,h,l,c):
-    body = abs(c-o)
-    if body==0: return False
-    up = h - max(o,c); low = min(o,c) - l
-    if low > body*1.8 and up < body*1.2: return "BUY"
-    if up > body*1.8 and low < body*1.2: return "SELL"
-    return False
+def check_signals(df, pair):
+    if len(df) < 60: return None
+    df['EMA50'] = df['Close'].ewm(span=50).mean()
+    i = -2
+    close = df['Close'].iloc[i]; open_ = df['Open'].iloc[i]; high = df['High'].iloc[i]; low = df['Low'].iloc[i]
+    ema50 = df['EMA50'].iloc[i]
+    body = abs(close-open_); upper = high-max(close,open_); lower = min(close,open_)-low
+    prev_open = df['Open'].iloc[i-1]; prev_close = df['Close'].iloc[i-1]
 
-def is_engulfing(po,pc,o,c):
-    if pc<po and c>o and c>po and o<pc: return "BUY"
-    if pc>po and c<o and c<po and o>pc: return "SELL"
-    return False
+    is_pin_bull = lower > body*2.0 and upper < body*0.6
+    is_pin_bear = upper > body*2.0 and lower < body*0.6
+    is_bull_eng = close>open_ and prev_close<prev_open and close>prev_open and open_<prev_close
+    is_bear_eng = close<open_ and prev_close>prev_open and close<prev_open and open_>prev_close
 
-def scan():
-    send_telegram("✅ *V3.2 POCKET AVVIATO!* 12 mercati reali - Filtri ULTRA leggeri per EURUSD!")
+    if is_pin_bull and close > ema50: return f"🟢 PIN BAR BUY - {pair}\nPrezzo sopra EMA50 - Trend UP"
+    if is_pin_bear and close < ema50: return f"🔴 PIN BAR SELL - {pair}\nPrezzo sotto EMA50 - Trend DOWN"
+    if is_bull_eng and close > ema50: return f"🟢 ENGULFING BUY - {pair}\nPrezzo sopra EMA50"
+    if is_bear_eng and close < ema50: return f"🔴 ENGULFING SELL - {pair}\nPrezzo sotto EMA50"
+    return None
+
+def bot_loop():
+    send_telegram("✅ *V2.5 REAL AVVIATO!*\n12 coppie - Pin FORTE + EMA50 - Sicuro ma spara!")
     while True:
-        for name, ticker in SYMBOLS.items():
+        for pair in PAIRS:
             try:
-                df = yf.download(ticker, period="5d", interval="15m", progress=False, auto_adjust=True)
-                if len(df)<60: continue
-                df['EMA50'] = df['Close'].ewm(span=50).mean()
-                delta = df['Close'].diff()
-                gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14).mean()
-                loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14).mean()
-                df['RSI'] = 100 - (100 / (1 + gain/loss))
-                prev, last = df.iloc[-2], df.iloc[-1]
-                o,h,l,c = float(last['Open']), float(last['High']), float(last['Low']), float(last['Close'])
-                po,pc = float(prev['Open']), float(prev['Close'])
-                ema50 = float(df['EMA50'].iloc[-1]); rsi = float(df['RSI'].iloc[-1])
-                if pd.isna(rsi): rsi=50
-                sig = is_pin_bar(o,h,l,c)
-                if not sig: sig = is_engulfing(po,pc,o,c)
-                if sig:
-                    if (sig=="BUY" and c>ema50 and 20<rsi<80) or (sig=="SELL" and c<ema50 and 20<rsi<80):
-                        send_telegram(f"🚨 *{sig} {name}* 15m\nPrezzo {c:.5f} RSI {rsi:.0f} - Pocket 30m")
-            except: continue
-        time.sleep(90)
+                df = yf.download(pair, period="2d", interval=TIMEFRAME, progress=False)
+                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+                sig = check_signals(df, pair)
+                if sig: send_telegram(f"🚨 *SEGNALE V2.5*\n\n{sig}\nTF: 15m -> Entra 30m su Pocket\nCoppia reale: {pair.replace('=X','')}")
+                time.sleep(1)
+            except: pass
+        time.sleep(60)
 
-if __name__ == "__main__":
-    Thread(target=scan, daemon=True).start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+threading.Thread(target=bot_loop, daemon=True).start()
+if __name__ == "__main__": app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
