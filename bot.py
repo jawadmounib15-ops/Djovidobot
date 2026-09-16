@@ -1,53 +1,70 @@
-import os, time, threading, requests, yfinance as yf, pandas as pd
+import yfinance as yf
+import pandas as pd
+import time
+import threading
+import requests
 from flask import Flask
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","GBPJPY=X","CADJPY=X","EURGBP=X","AUDJPY=X","GBPCHF=X","EURCAD=X"]
-TIMEFRAME = "15m"
+# CONFIG
+TOKEN = "INSERISCI_IL_TUO_TOKEN"
+CHAT_ID = "INSERISCI_CHAT_ID"
+COPPIE = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "EURJPY=X", "GBPJPY=X", "EURGBP=X", "USDCAD=X", "EURCAD=X", "AUDJPY=X", "NZDUSD=X", "CADJPY=X"]
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot V2.5 REAL LIVE - DjovidoBot"
+def home(): return "V2.6 ANTI-SPAM ATTIVO"
+
+last_sent = {} # <--- ANTI SPAM
 
 def send_telegram(msg):
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
     except: pass
 
-def check_signals(df, pair):
-    if len(df) < 60: return None
-    df['EMA50'] = df['Close'].ewm(span=50).mean()
-    i = -2
-    close = df['Close'].iloc[i]; open_ = df['Open'].iloc[i]; high = df['High'].iloc[i]; low = df['Low'].iloc[i]
-    ema50 = df['EMA50'].iloc[i]
-    body = abs(close-open_); upper = high-max(close,open_); lower = min(close,open_)-low
-    prev_open = df['Open'].iloc[i-1]; prev_close = df['Close'].iloc[i-1]
+def check_candles(pair):
+    try:
+        df = yf.download(pair, period="2d", interval="15m", progress=False)
+        if len(df) < 55: return None
+        df['EMA50'] = df['Close'].ewm(span=50).mean()
+        c = df.iloc[-1]
+        prev = df.iloc[-2]
+        close = float(c['Close'])
+        open_ = float(c['Open'])
+        ema = float(c['EMA50'])
 
-    is_pin_bull = lower > body*2.0 and upper < body*0.6
-    is_pin_bear = upper > body*2.0 and lower < body*0.6
-    is_bull_eng = close>open_ and prev_close<prev_open and close>prev_open and open_<prev_close
-    is_bear_eng = close<open_ and prev_close>prev_open and close<prev_open and open_>prev_close
+        # PIN BAR FORTE
+        body = abs(close - open_)
+        upper = float(c['High']) - max(close, open_)
+        lower = min(close, open_) - float(c['Low'])
 
-    if is_pin_bull and close > ema50: return f"🟢 PIN BAR BUY - {pair}\nPrezzo sopra EMA50 - Trend UP"
-    if is_pin_bear and close < ema50: return f"🔴 PIN BAR SELL - {pair}\nPrezzo sotto EMA50 - Trend DOWN"
-    if is_bull_eng and close > ema50: return f"🟢 ENGULFING BUY - {pair}\nPrezzo sopra EMA50"
-    if is_bear_eng and close < ema50: return f"🔴 ENGULFING SELL - {pair}\nPrezzo sotto EMA50"
+        pin_sell = lower > body*2.5 and close < open_ and close < ema
+        pin_buy = upper > body*2.5 and close > open_ and close > ema
+
+        eng_sell = close < open_ and float(prev['Close']) > float(prev['Open']) and close < ema
+        eng_buy = close > open_ and float(prev['Close']) < float(prev['Open']) and close > ema
+
+        if pin_sell: return f"🔴 PIN BAR SELL - {pair}\nPrezzo sotto EMA50 - Trend DOWN"
+        if pin_buy: return f"🟢 PIN BAR BUY - {pair}\nPrezzo sopra EMA50 - Trend UP"
+        if eng_sell: return f"🔴 ENGULFING SELL - {pair}\nPrezzo sotto EMA50"
+        if eng_buy: return f"🟢 ENGULFING BUY - {pair}\nPrezzo sopra EMA50"
+    except: return None
     return None
 
 def bot_loop():
-    send_telegram("✅ *V2.5 REAL AVVIATO!*\n12 coppie - Pin FORTE + EMA50 - Sicuro ma spara!")
+    send_telegram("✅ V2.6 ANTI-SPAM AVVIATO!")
     while True:
-        for pair in PAIRS:
-            try:
-                df = yf.download(pair, period="2d", interval=TIMEFRAME, progress=False)
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-                sig = check_signals(df, pair)
-                if sig: send_telegram(f"🚨 *SEGNALE V2.5*\n\n{sig}\nTF: 15m -> Entra 30m su Pocket\nCoppia reale: {pair.replace('=X','')}")
-                time.sleep(1)
-            except: pass
+        for pair in COPPIE:
+            sig = check_candles(pair)
+            if sig:
+                # Controllo anti-spam 30 minuti
+                now = time.time()
+                if pair not in last_sent or now - last_sent[pair] > 1800:
+                    send_telegram(f"🚨 *SEGNALE V2.6*\n\n{sig}\nTF: 15m -> Entra 30m su Pocket\nCoppia reale: {pair.replace('=X','')}")
+                    last_sent[pair] = now
         time.sleep(60)
 
 threading.Thread(target=bot_loop, daemon=True).start()
-if __name__ == "__main__": app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
