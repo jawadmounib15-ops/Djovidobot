@@ -1,90 +1,78 @@
 import yfinance as yf
-import time
 import requests
-import os
-import threading
-from flask import Flask
+import time
 
-# --- PER RENDER - SITO FITTO COSI NON SI SPEGNE ---
-app = Flask(__name__)
+TOKEN = "INSERISCI_QUI_TOKEN"
+CHAT_ID = "INSERISCI_QUI_CHAT_ID"
+ENGULFING = 1.20 # Filtro 80% SICURO Pa!
 
-@app.route('/')
-def home():
-    return "🟢 V12 75% LIVE - 21 coppie attive - Pa!"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-threading.Thread(target=run_web, daemon=True).start()
-# --- FINE FIX RENDER ---
-
-# --- DATI TELEGRAM - METTI I TUOI QUI PA ---
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-# --- 21 COPPIE REALI TUE ---
-COPPIE_POCKET = [
-    "USD/JPY", "AUD/JPY", "AUD/CHF", "GBP/USD", "CAD/JPY",
-    "CHF/JPY", "AUD/USD", "GBP/CAD", "USD/CHF", "EUR/JPY",
-    "USD/CAD", "EUR/CHF", "EUR/GBP", "AUD/CAD", "GBP/CHF",
-    "GBP/AUD", "EUR/USD", "GBP/JPY", "EUR/CAD", "CAD/CHF", "EUR/AUD"
+COPPIE_YF = [
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X",
+    "EURGBP=X", "EURJPY=X", "GBPJPY=X", "AUDJPY=X", "EURCAD=X",
+    "GBPCHF=X", "EURCHF=X", "AUDCAD=X", "GBPCAD=X", "EURAUD=X",
+    "GBPAUD=X", "AUDCHF=X", "CADJPY=X", "CHFJPY=X", "EURTRY=X",
+    "USDTRY=X"
 ]
 
-def converti(nome):
-    return nome.replace("/", "") + "=X"
-
-COPPIE_YF = [converti(c) for c in COPPIE_POCKET]
-ENGULFING = 0.75
+COPPIE_POCKET = [
+    "EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD",
+    "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "EUR/CAD",
+    "GBP/CHF", "EUR/CHF", "AUD/CAD", "GBP/CAD", "EUR/AUD",
+    "GBP/AUD", "AUD/CHF", "CAD/JPY", "CHF/JPY", "EUR/TRY",
+    "USD/TRY"
+]
 
 def manda_telegram(messaggio):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": messaggio}, timeout=10)
-    except Exception as e:
-        print(f"Telegram errore: {e}")
+    except:
+        pass
 
 def analizza():
-    print(">>> Inizio giro 21 coppie...")
+    print(f">>> Giro 21 coppie - 80% SICURO - Filtro {ENGULFING}")
     for i, simbolo_yf in enumerate(COPPIE_YF):
-        nome_pocket = COPPIE_POCKET[i]
+        nome = COPPIE_POCKET[i]
         try:
             df = yf.download(simbolo_yf, period="3d", interval="15m", progress=False, auto_adjust=True)
             if len(df) < 200:
                 continue
 
-            # LAVORO 1 - TREND EMA 50/200
             ema50 = df['Close'].ewm(span=50).mean().iloc[-1].item()
             ema200 = df['Close'].ewm(span=200).mean().iloc[-1].item()
             trend = "BUY" if ema50 > ema200 else "SELL"
 
-            # LAVORO 2 - ENGULFING 75%
             ultima = df.iloc[-1]
             prec = df.iloc[-2]
-            corpo_ult = abs(float(ultima['Close'].iloc[0] if hasattr(ultima['Close'], 'iloc') else ultima['Close']) - float(ultima['Open'].iloc[0] if hasattr(ultima['Open'], 'iloc') else ultima['Open']))
-            corpo_prec = abs(float(prec['Close'].iloc[0] if hasattr(prec['Close'], 'iloc') else prec['Close']) - float(prec['Open'].iloc[0] if hasattr(prec['Open'], 'iloc') else prec['Open']))
+
+            def get_val(c, col):
+                v = c[col]
+                return float(v.iloc[0] if hasattr(v, 'iloc') else v)
+
+            corpo_ult = abs(get_val(ultima, 'Close') - get_val(ultima, 'Open'))
+            corpo_prec = abs(get_val(prec, 'Close') - get_val(prec, 'Open'))
             if corpo_prec == 0:
                 continue
+
             rapporto = corpo_ult / corpo_prec
+            close_u = get_val(ultima, 'Close')
+            open_u = get_val(ultima, 'Open')
 
             engulf = None
-            close_u = float(ultima['Close'].iloc[0] if hasattr(ultima['Close'], 'iloc') else ultima['Close'])
-            open_u = float(ultima['Open'].iloc[0] if hasattr(ultima['Open'], 'iloc') else ultima['Open'])
             if rapporto >= ENGULFING:
                 engulf = "BUY" if close_u > open_u else "SELL"
 
-            # LAVORO 3 - SICURO
             if engulf and trend == engulf:
-                msg = f"🟢 SEGNALE SICURO 75% - {nome_pocket} - {trend}\n3 LAVORI OK - Ratio: {rapporto:.2f}"
+                msg = f"🟢 SEGNALE SICURO 80% - {nome} - {trend}\n3 LAVORI OK - Ratio: {rapporto:.2f}"
                 print(msg)
                 manda_telegram(msg)
 
         except Exception as e:
-            print(f"Errore {nome_pocket}: {e}")
+            print(f"Errore {nome}: {e}")
 
-print("V12 75% AVVIATO - 21 COPPIE REALI - FIX RENDER")
-manda_telegram("🟢 V12 75% AVVIATO - FIX RENDER\n21 coppie attive\nNon si spegne più!")
+print(f"V13 AVVIATO - 80% SICURO - FILTRO {ENGULFING}")
+manda_telegram(f"🟢 V13 AVVIATO - 80% SICURO - Filtro {ENGULFING} - 21 coppie")
 
 while True:
     analizza()
-    print("Giro finito, aspetto 15 min...")
     time.sleep(900)
