@@ -1,72 +1,77 @@
-import os, time, requests, threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import time
 import yfinance as yf
-from ta.trend import EMAIndicator
-from ta.momentum import RSIIndicator
+import pandas as pd
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT = os.getenv("TELEGRAM_CHAT_ID")
+# CONFIGURAZIONE
+COPPIE = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X"]
+TELEGRAM_TOKEN = "METTI QUI IL TUO TOKEN"
+TELEGRAM_CHAT_ID = "METTI QUI IL TUO CHAT ID"
 
-def keep_alive():
-    class H(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'OK')
-        def log_message(self, *a):
-            return
-    HTTPServer(('0.0.0.0', int(os.getenv("PORT","10000"))), H).serve_forever()
-threading.Thread(target=keep_alive, daemon=True).start()
+# REGOLE V12 75% - PIU' LARGHE!
+ENGULFING_RATIO = 0.75  # Prima era 0.80, adesso 75%!
+EMA_FAST = 50
+EMA_SLOW = 200
+RSI_MIN = 30
+RSI_MAX = 70
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","USDCHF=X","EURJPY=X","GBPJPY=X"]
+def lavoro1_trend(df):
+    # Guarda EMA 50 e 200
+    ema50 = df['Close'].ewm(span=EMA_FAST).mean().iloc[-1]
+    ema200 = df['Close'].ewm(span=EMA_SLOW).mean().iloc[-1]
+    if ema50 > ema200:
+        return "BUY"
+    else:
+        return "SELL"
 
-def send(m):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT,"text":m})
-    except: pass
+def lavoro2_engulfing(df):
+    # Guarda candela grossa 75% (prima era 80%)
+    ultima = df.iloc[-1]
+    precedente = df.iloc[-2]
+    
+    corpo_ultima = abs(ultima['Close'] - ultima['Open'])
+    corpo_prec = abs(precedente['Close'] - precedente['Open'])
+    
+    if corpo_prec == 0:
+        return None
+    
+    rapporto = corpo_ultima / corpo_prec
+    
+    if rapporto >= ENGULFING_RATIO:
+        if ultima['Close'] > ultima['Open']:
+            return "BUY"
+        else:
+            return "SELL"
+    return None
 
-send("BOT V12 - 3 LAVORI - 15 MIN - PARTITO!")
+def lavoro3_sicuro(trend, engulfing):
+    # Se tutti e due dicono uguale = SICURO 75%!
+    if trend == engulfing and engulfing is not None:
+        return True
+    return False
+
+# LOOP PRINCIPALE
+print("V12 75% AVVIATO - 3 LAVORI - ASPETTO SEGNALI...")
 
 while True:
-    try:
-        for p in PAIRS:
-            df = yf.download(p, period="5d", interval="15m", progress=False, auto_adjust=True)
-            if len(df) < 210: continue
-            c = df['Close']
-            o = df['Open']
-            ema50 = float(EMAIndicator(c, 50).ema_indicator().iloc[-1])
-            ema200 = float(EMAIndicator(c, 200).ema_indicator().iloc[-1])
-            rsi = float(RSIIndicator(c, 14).rsi().iloc[-1])
-            price = float(c.iloc[-1])
+    for coppia in COPPIE:
+        try:
+            df = yf.download(coppia, period="2d", interval="15m", progress=False)
+            if len(df) < 200:
+                continue
             
-            # Lavoro 2 - candele
-            prev_close = float(c.iloc[-2])
-            prev_open = float(o.iloc[-2])
-            curr_open = float(o.iloc[-1])
-            curr_close = float(c.iloc[-1])
-            # Engulfing
-            bull_eng = curr_close > curr_open and prev_close < prev_open and curr_close > prev_open and curr_open < prev_close
-            bear_eng = curr_close < curr_open and prev_close > prev_open and curr_close < prev_open and curr_open > prev_close
+            # 3 LAVORI
+            trend = lavoro1_trend(df)
+            engulf = lavoro2_engulfing(df)
+            sicuro = lavoro3_sicuro(trend, engulf)
             
-            signal = None
-            # Lavoro 3 - SICURO (tutti insieme)
-            if price > ema50 and ema50 > ema200 and 25 < rsi < 70 and bull_eng:
-                signal = f"🟢 BUY SICURO 80% {p} - 3 LAVORI OK - 15 MIN"
-            elif price < ema50 and ema50 < ema200 and 30 < rsi < 75 and bear_eng:
-                signal = f"🔴 SELL SICURO 80% {p} - 3 LAVORI OK - 15 MIN"
-            # Lavoro 1 - Trend
-            elif price > ema50 and ema50 > ema200 and 30 < rsi < 68:
-                signal = f"BUY Trend {p} RSI {rsi:.0f} 15MIN"
-            elif price < ema50 and ema50 < ema200 and 32 < rsi < 70:
-                signal = f"SELL Trend {p} RSI {rsi:.0f} 15MIN"
-            # Lavoro 2 - Solo candela forte
-            elif bull_eng and 30 < rsi < 70:
-                signal = f"BUY Candela 80% {p} Engulfing 15MIN"
-            elif bear_eng and 30 < rsi < 70:
-                signal = f"SELL Candela 80% {p} Engulfing 15MIN"
-
-            if signal: send(signal)
-            time.sleep(3)
-        time.sleep(900)
-    except:
-        time.sleep(60)
+            if sicuro:
+                print(f"🟢 SEGNALE SICURO 75% - {coppia} - {trend} - 3 LAVORI OK!")
+                # Qui manda telegram
+            elif engulf:
+                print(f"🟡 SEGNALE 75% - {coppia} - {engulf}")
+                
+        except Exception as e:
+            print(f"Errore {coppia}: {e}")
+    
+    print("Controllo finito, aspetto 15 min...")
+    time.sleep(900)  # 15 minuti
