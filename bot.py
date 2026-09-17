@@ -1,9 +1,10 @@
 import yfinance as yf
 import requests
 import time
+import os
 
-TOKEN = "TELEGRAM_TOKEN"
-CHAT_ID = "TELEGRAM_CHAT_ID"
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 ENGULFING = 1.20 # Filtro 80% SICURO Pa!
 
 COPPIE_YF = [
@@ -37,36 +38,28 @@ def analizza():
             df = yf.download(simbolo_yf, period="3d", interval="15m", progress=False, auto_adjust=True)
             if len(df) < 200:
                 continue
-
             ema50 = df['Close'].ewm(span=50).mean().iloc[-1].item()
             ema200 = df['Close'].ewm(span=200).mean().iloc[-1].item()
             trend = "BUY" if ema50 > ema200 else "SELL"
-
             ultima = df.iloc[-1]
             prec = df.iloc[-2]
-
             def get_val(c, col):
                 v = c[col]
                 return float(v.iloc[0] if hasattr(v, 'iloc') else v)
-
             corpo_ult = abs(get_val(ultima, 'Close') - get_val(ultima, 'Open'))
             corpo_prec = abs(get_val(prec, 'Close') - get_val(prec, 'Open'))
             if corpo_prec == 0:
                 continue
-
             rapporto = corpo_ult / corpo_prec
             close_u = get_val(ultima, 'Close')
             open_u = get_val(ultima, 'Open')
-
             engulf = None
             if rapporto >= ENGULFING:
                 engulf = "BUY" if close_u > open_u else "SELL"
-
             if engulf and trend == engulf:
                 msg = f"🟢 SEGNALE SICURO 80% - {nome} - {trend}\n3 LAVORI OK - Ratio: {rapporto:.2f}"
                 print(msg)
                 manda_telegram(msg)
-
         except Exception as e:
             print(f"Errore {nome}: {e}")
 
