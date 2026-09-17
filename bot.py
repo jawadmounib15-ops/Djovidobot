@@ -2,47 +2,58 @@ import yfinance as yf, os, time, threading, requests, pandas as pd
 from flask import Flask
 TOKEN=os.getenv("TELEGRAM_TOKEN")
 CHAT_ID=os.getenv("TELEGRAM_CHAT_ID")
-print(f"--- V2.8 DEFINITIVO AVVIATO TOKEN ok={bool(TOKEN)} ---")
+print(f"--- V9.3 SICURO - POCHI MA BUONISSIMI ---")
 COPPIE=["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","EURCAD=X","USDCHF=X","AUDUSD=X","EURGBP=X"]
 app=Flask(__name__)
 @app.route('/')
-def home(): return "V2.8 ONLINE"
-last_sent={}
+def home(): return "V9.3 ONLINE - SICURO"
+last_global = 0 # pausa globale
+
 def send(msg):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",data={"chat_id":CHAT_ID,"text":msg},timeout=10)
+    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",data={"chat_id":CHAT_ID,"text":msg},timeout=10)
     except: pass
-def get_price(df):
-    # Questo sistema funziona SEMPRE, anche se yfinance cambia formato
-    try:
-        c = df['Close']
-        if isinstance(c, pd.DataFrame):
-            c = c.iloc[:,0]
-        return float(c.iloc[-1]), float(c.iloc[-2]), float(c.ewm(span=50).mean().iloc[-1])
-    except:
-        return None,None,None
-def check(pair):
-    try:
-        df=yf.download(pair,period="2d",interval="5m",progress=False,auto_adjust=True)
-        if len(df)<55: return None
-        close, prev, ema = get_price(df)
-        if close is None: return None
-        if time.time()-last_sent.get(pair,0)<2700: return None
-        sig=None
-        if prev < ema and close > ema: sig=f"🟢 BUY {pair.replace('=X','')} @ {close:.5f}"
-        elif prev > ema and close < ema: sig=f"🔴 SELL {pair.replace('=X','')} @ {close:.5f}"
-        if sig: last_sent[pair]=time.time(); return sig
-    except Exception as e:
-        print(f"Err {pair}:{e}")
-        return None
+
 def loop():
-    print("Loop partito V2.8")
-    send("✅ DjovidoBot V2.8 DEFINITIVO ONLINE - Rosso sistemato!")
+    global last_global
+    print("Loop V9.3")
+    send("✅ V9.3 SICURO ONLINE - 8 coppie, max 1 ogni 15min, filtro duro RSI 60/40")
     while True:
-        for cp in COPPIE:
-            m=check(cp)
-            if m: send(m)
-        time.sleep(60)
+        # se ha già mandato da meno di 15 min, non manda niente
+        if time.time() - last_global < 900:
+            time.sleep(60)
+            continue
+
+        candidati=[]
+        for pair in COPPIE:
+            try:
+                df=yf.download(pair,period="5d",interval="15m",progress=False,auto_adjust=True)
+                if len(df)<210: continue
+                c = df['Close']
+                if isinstance(c, pd.DataFrame): c = c.iloc[:,0]
+                close=float(c.iloc[-1]); prev=float(c.iloc[-2])
+                open_price=float(df['Open'].iloc[-1]) if not isinstance(df['Open'], pd.DataFrame) else float(df['Open'].iloc[:,0].iloc[-1])
+                ema50=float(c.ewm(span=50).mean().iloc[-1])
+                ema200=float(c.ewm(span=200).mean().iloc[-1])
+                delta=c.diff(); gain=delta.where(delta>0,0).rolling(14).mean(); loss=-delta.where(delta<0,0).rolling(14).mean()
+                rsi=float(100-(100/(1+gain.iloc[-1]/loss.iloc[-1])))
+                corpo = abs(close-open_price)/close*100
+                if corpo < 0.02: continue # candela troppo piccola, scarta
+                score = abs(close-ema50)/close*100 + abs(rsi-50)/10 + corpo
+
+                if prev < ema50 and close > ema50 and close > ema200 and rsi >= 60:
+                    candidati.append((score, f"🟢 BUY SICURO {pair.replace('=X','')} @ {close:.5f} RSI:{rsi:.0f}"))
+                elif prev > ema50 and close < ema50 and close < ema200 and rsi <= 40:
+                    candidati.append((score, f"🔴 SELL SICURO {pair.replace('=X','')} @ {close:.5f} RSI:{rsi:.0f}"))
+            except: continue
+
+        if candidati:
+            candidati.sort(reverse=True)
+            send(candidati[0][1])
+            last_global = time.time()
+            print(f"Inviato: {candidati[0][1]}")
+
+        time.sleep(120)
+
 threading.Thread(target=loop,daemon=True).start()
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
