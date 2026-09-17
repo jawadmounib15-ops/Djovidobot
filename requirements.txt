@@ -1,4 +1,4 @@
-yfinance
-requests
-pandas
-flask 
+   gunicorn
+   flask
+   yfinance
+   requests 
