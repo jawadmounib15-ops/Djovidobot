@@ -20,9 +20,8 @@ threading.Thread(target=run_web, daemon=True).start()
 # --- FINE FIX RENDER ---
 
 # --- DATI TELEGRAM - METTI I TUOI QUI PA ---
-TOKEN = os.environ.get("TOKEN", "METTI QUI IL TUO TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID", "METTI QUI IL TUO CHAT ID")
-
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 # --- 21 COPPIE REALI TUE ---
 COPPIE_POCKET = [
     "USD/JPY", "AUD/JPY", "AUD/CHF", "GBP/USD", "CAD/JPY",
