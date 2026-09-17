@@ -2,6 +2,9 @@ import yfinance as yf
 import requests
 import time
 import os
+from threading import Thread
+from flask import Flask
+from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -23,6 +26,12 @@ COPPIE_POCKET = [
     "USD/TRY"
 ]
 
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot 80% LIVE - NO OTC NOTTE - REGOLE VERE Pa!", 200
+
 def manda_telegram(messaggio):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -31,6 +40,12 @@ def manda_telegram(messaggio):
         pass
 
 def analizza():
+    ora = datetime.now().hour
+    # REGOLA 1 Pa: NO SEGNALI 22:00-08:00 Pa! Stop OTC!
+    if ora >= 22 or ora < 8:
+        print(f"[{ora}:00] NOTTE Pa - Rispetto REGOLA 1 - Niente segnali OTC")
+        return
+
     print(f">>> Giro 21 coppie - 80% SICURO - Filtro {ENGULFING}")
     for i, simbolo_yf in enumerate(COPPIE_YF):
         nome = COPPIE_POCKET[i]
@@ -43,29 +58,41 @@ def analizza():
             trend = "BUY" if ema50 > ema200 else "SELL"
             ultima = df.iloc[-1]
             prec = df.iloc[-2]
+
             def get_val(c, col):
                 v = c[col]
                 return float(v.iloc[0] if hasattr(v, 'iloc') else v)
+
             corpo_ult = abs(get_val(ultima, 'Close') - get_val(ultima, 'Open'))
             corpo_prec = abs(get_val(prec, 'Close') - get_val(prec, 'Open'))
             if corpo_prec == 0:
                 continue
+
             rapporto = corpo_ult / corpo_prec
             close_u = get_val(ultima, 'Close')
             open_u = get_val(ultima, 'Open')
             engulf = None
             if rapporto >= ENGULFING:
                 engulf = "BUY" if close_u > open_u else "SELL"
+
             if engulf and trend == engulf:
-                msg = f"🟢 SEGNALE SICURO 80% - {nome} - {trend}\n3 LAVORI OK - Ratio: {rapporto:.2f}"
+                msg = f"✅ SEGNALE SICURO 80% - {nome} - {trend}\n3 LAVORI OK - Ratio: {rapporto:.2f}"
                 print(msg)
                 manda_telegram(msg)
+
         except Exception as e:
             print(f"Errore {nome}: {e}")
 
-print(f"V13 AVVIATO - 80% SICURO - FILTRO {ENGULFING}")
-manda_telegram(f"🟢 V13 AVVIATO - 80% SICURO - Filtro {ENGULFING} - 21 coppie")
+def run_bot():
+    print(f"V13 AVVIATO - 80% SICURO - FILTRO {ENGULFING} - 21 coppie - REGOLE VERE")
+    manda_telegram(f"✅ V13 AVVIATO - 80% SICURO - Filtro {ENGULFING} - 21 coppie - REGOLE VERE Pa!")
+    while True:
+        analizza()
+        print("Giro finito, aspetto 15 min...")
+        time.sleep(900)
 
-while True:
-    analizza()
-    time.sleep(900)
+Thread(target=run_bot, daemon=True).start()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
