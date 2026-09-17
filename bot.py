@@ -1,7 +1,7 @@
 import os, time, requests, threading
 import yfinance as yf
-from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
+from ta.momentum import RSIIndicator
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -15,46 +15,40 @@ def keep_alive():
             self.wfile.write(b'OK')
         def log_message(self, a, *b):
             return
-    HTTPServer(('0.0.0.0', int(os.getenv("PORT", 10000))), H).serve_forever()
-
+    HTTPServer(('0.0.0.0', int(os.getenv("PORT", "10000"))), H).serve_forever()
 threading.Thread(target=keep_alive, daemon=True).start()
 
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","USDCHF=X","EURJPY=X","GBPJPY=X"]
-ultimo = 0
 
 def send(m):
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"})
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT, "text": m})
     except:
         pass
 
-print("Bot V9.8 avviato")
-send("Bot V9.8 FIXATO - Ora funziona - Senza emoji")
+send("Bot V11 LIVE - Studia a 15 MINUTI preciso!")
 
 while True:
     try:
-        if time.time() - ultimo < 900:
-            time.sleep(30)
-            continue
         for p in PAIRS:
-            df = yf.download(p, period="3d", interval="5m", progress=False, auto_adjust=True)
-            if len(df) < 210:
+            df = yf.download(p, period="5d", interval="15m", progress=False, auto_adjust=True)
+            if len(df) < 100:
                 continue
             c = df['Close']
-            rsi = float(RSIIndicator(c, 14).rsi().iloc[-1])
             ema50 = float(EMAIndicator(c, 50).ema_indicator().iloc[-1])
             ema200 = float(EMAIndicator(c, 200).ema_indicator().iloc[-1])
+            rsi = float(RSIIndicator(c, 14).rsi().iloc[-1])
             price = float(c.iloc[-1])
-            if 30 <= rsi <= 42 and price > ema50 and ema50 > ema200:
-                send(f"BUY FORTE {p} RSI {rsi:.1f} 90% Prezzo {price:.5f}")
-                ultimo = time.time()
-                break
-            if 58 <= rsi <= 70 and price < ema50 and ema50 < ema200:
-                send(f"SELL FORTE {p} RSI {rsi:.1f} 90% Prezzo {price:.5f}")
-                ultimo = time.time()
-                break
-            print(f"{p} RSI {rsi:.1f} scartato")
-        time.sleep(60)
-    except Exception as e:
-        print(e)
+            
+            signal = None
+            if price > ema50 and ema50 > ema200 and 35 < rsi < 60:
+                signal = f"BUY FORTE 15MIN {p} RSI {rsi:.0f} - Entra 15min"
+            elif price < ema50 and ema50 < ema200 and 40 < rsi < 65:
+                signal = f"SELL FORTE 15MIN {p} RSI {rsi:.0f} - Entra 15min"
+            
+            if signal:
+                send(signal)
+            time.sleep(3)
+        time.sleep(900)
+    except:
         time.sleep(60)
