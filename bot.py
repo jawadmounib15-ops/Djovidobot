@@ -2,8 +2,8 @@ import yfinance as yf
 import requests
 import time
 
-TOKEN = "INSERISCI_QUI_TOKEN"
-CHAT_ID = "INSERISCI_QUI_CHAT_ID"
+TOKEN = "TELEGRAM_TOKEN"
+CHAT_ID = "TELEGRAM_CHAT_ID"
 ENGULFING = 1.20 # Filtro 80% SICURO Pa!
 
 COPPIE_YF = [
