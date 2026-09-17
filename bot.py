@@ -1,77 +1,75 @@
-import time
 import yfinance as yf
-import pandas as pd
+import time
+import requests
 
-# CONFIGURAZIONE
-COPPIE = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X"]
-TELEGRAM_TOKEN = "METTI QUI IL TUO TOKEN"
-TELEGRAM_CHAT_ID = "METTI QUI IL TUO CHAT ID"
+# --- TUOI DATI TELEGRAM ---
+TOKEN = "METTI QUI IL TUO TOKEN"
+CHAT_ID = "METTI QUI IL TUO CHAT ID"
 
-# REGOLE V12 75% - PIU' LARGHE!
-ENGULFING_RATIO = 0.75  # Prima era 0.80, adesso 75%!
-EMA_FAST = 50
-EMA_SLOW = 200
-RSI_MIN = 30
-RSI_MAX = 70
+# --- 21 COPPIE REALI TUE - TUTTE! ---
+COPPIE_POCKET = [
+    "USD/JPY", "AUD/JPY", "AUD/CHF", "GBP/USD", "CAD/JPY",
+    "CHF/JPY", "AUD/USD", "GBP/CAD", "USD/CHF", "EUR/JPY",
+    "USD/CAD", "EUR/CHF", "EUR/GBP", "AUD/CAD", "GBP/CHF",
+    "GBP/AUD", "EUR/USD", "GBP/JPY", "EUR/CAD", "CAD/CHF", "EUR/AUD"
+]
 
-def lavoro1_trend(df):
-    # Guarda EMA 50 e 200
-    ema50 = df['Close'].ewm(span=EMA_FAST).mean().iloc[-1]
-    ema200 = df['Close'].ewm(span=EMA_SLOW).mean().iloc[-1]
-    if ema50 > ema200:
-        return "BUY"
-    else:
-        return "SELL"
+# Converte da Pocket a yfinance
+def converti(nome):
+    return nome.replace("/", "") + "=X"
 
-def lavoro2_engulfing(df):
-    # Guarda candela grossa 75% (prima era 80%)
-    ultima = df.iloc[-1]
-    precedente = df.iloc[-2]
-    
-    corpo_ultima = abs(ultima['Close'] - ultima['Open'])
-    corpo_prec = abs(precedente['Close'] - precedente['Open'])
-    
-    if corpo_prec == 0:
-        return None
-    
-    rapporto = corpo_ultima / corpo_prec
-    
-    if rapporto >= ENGULFING_RATIO:
-        if ultima['Close'] > ultima['Open']:
-            return "BUY"
-        else:
-            return "SELL"
-    return None
+COPPIE_YF = [converti(c) for c in COPPIE_POCKET]
+ENGULFING = 0.75 # 75% come hai detto tu Pa!
 
-def lavoro3_sicuro(trend, engulfing):
-    # Se tutti e due dicono uguale = SICURO 75%!
-    if trend == engulfing and engulfing is not None:
-        return True
-    return False
+def manda_telegram(messaggio):
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": messaggio})
+    except:
+        pass
 
-# LOOP PRINCIPALE
-print("V12 75% AVVIATO - 3 LAVORI - ASPETTO SEGNALI...")
-
-while True:
-    for coppia in COPPIE:
+def analizza():
+    for i, simbolo_yf in enumerate(COPPIE_YF):
+        nome_pocket = COPPIE_POCKET[i]
         try:
-            df = yf.download(coppia, period="2d", interval="15m", progress=False)
+            df = yf.download(simbolo_yf, period="3d", interval="15m", progress=False)
             if len(df) < 200:
                 continue
-            
-            # 3 LAVORI
-            trend = lavoro1_trend(df)
-            engulf = lavoro2_engulfing(df)
-            sicuro = lavoro3_sicuro(trend, engulf)
-            
-            if sicuro:
-                print(f"🟢 SEGNALE SICURO 75% - {coppia} - {trend} - 3 LAVORI OK!")
-                # Qui manda telegram
+
+            # LAVORO 1 - TREND EMA 50/200
+            ema50 = df['Close'].ewm(span=50).mean().iloc[-1]
+            ema200 = df['Close'].ewm(span=200).mean().iloc[-1]
+            trend = "BUY" if ema50 > ema200 else "SELL"
+
+            # LAVORO 2 - ENGULFING 75%
+            ultima = df.iloc[-1]
+            prec = df.iloc[-2]
+            corpo_ult = abs(float(ultima['Close'] - ultima['Open']))
+            corpo_prec = abs(float(prec['Close'] - prec['Open']))
+            if corpo_prec == 0:
+                continue
+            rapporto = corpo_ult / corpo_prec
+
+            engulf = None
+            if rapporto >= ENGULFING:
+                engulf = "BUY" if ultima['Close'] > ultima['Open'] else "SELL"
+
+            # LAVORO 3 - SICURO 75%
+            if engulf and trend == engulf:
+                msg = f"🟢 SEGNALE SICURO 75% - {nome_pocket} - {trend}\n3 LAVORI OK - 21 coppie"
+                print(msg)
+                manda_telegram(msg)
             elif engulf:
-                print(f"🟡 SEGNALE 75% - {coppia} - {engulf}")
-                
+                print(f"🟡 Segnale 75% {nome_pocket} {engulf}")
+
         except Exception as e:
-            print(f"Errore {coppia}: {e}")
-    
-    print("Controllo finito, aspetto 15 min...")
-    time.sleep(900)  # 15 minuti
+            print(f"Errore {nome_pocket}: {e}")
+
+# --- AVVIO ---
+print("V12 75% AVVIATO - 21 COPPIE REALI")
+manda_telegram("🟢 V12 75% AVVIATO\n21 coppie reali attive\nCerco segnali 75% ogni 15 min")
+
+while True:
+    analizza()
+    print("Finito giro 21 coppie, aspetto 15 min...")
+    time.sleep(900)
