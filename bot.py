@@ -1,98 +1,45 @@
-# bot.py - V9.6 ULTRA FORTE - TUTTO IL GIORNO
-import os
-import time
-import requests
+import os, time, requests, threading
 import yfinance as yf
 from datetime import datetime
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT = os.getenv("CHAT_ID")
 
-# CONFIG ULTRA FORTE
-PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "EURJPY=X", "GBPJPY=X"]
-RSI_BUY_MIN = 30
-RSI_BUY_MAX = 42  # più stretto = più forte
-RSI_SELL_MIN = 58 # più stretto = più forte
-RSI_SELL_MAX = 70
-EMA_PERIOD = 50
-EMA_TREND = 200
-COOLDOWN = 20 * 60  # 20 min tra segnali
+def keep_alive():
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.end_headers(); self.wfile.write(b'Bot OK')
+    HTTPServer(('0.0.0.0', int(os.getenv("PORT", 10000))), H).serve_forever()
+threading.Thread(target=keep_alive, daemon=True).start()
 
-ultimo_segnale = 0
+PAIRS=["EURUSD=X","GBPUSD=X","USDJPY=X","USDCHF=X","EURJPY=X","GBPJPY=X"]
+ultimo=0
+def send(m):
+    requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"})
 
-def send_telegram(msg):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"})
-    except Exception as e:
-        print(f"Err telegram: {e}")
-
-def is_strong_signal(rsi, price, ema50, ema200):
-    # FILTRO 1: Scarta RSI estremi - troppo pericoloso
-    if rsi < 28 or rsi > 72:
-        return False, f"Scartato RSI estremo {rsi:.1f}"
-
-    # FILTRO 2: Scarta zona neutra 42-58 - troppo debole
-    if 42 < rsi < 58:
-        return False, f"Scartato zona neutra {rsi:.1f}"
-
-    # FILTRO 3: BUY ULTRA FORTE - 3 conferme insieme
-    # RSI 30-42 + prezzo > EMA50 + EMA50 > EMA200 (trend su forte)
-    if RSI_BUY_MIN <= rsi <= RSI_BUY_MAX:
-        if price > ema50 and ema50 > ema200:
-            forza = 90 if rsi < 35 else 85
-            return True, f"🟢 *BUY ULTRA FORTE*\nRSI {rsi:.1f} + EMA50>EMA200\nForza: {forza}%\nScadenza: 30m"
-    
-    # FILTRO 4: SELL ULTRA FORTE - 3 conferme insieme
-    # RSI 58-70 + prezzo < EMA50 + EMA50 < EMA200 (trend giù forte)
-    if RSI_SELL_MIN <= rsi <= RSI_SELL_MAX:
-        if price < ema50 and ema50 < ema200:
-            forza = 90 if rsi > 65 else 85
-            return True, f"🔴 *SELL ULTRA FORTE*\nRSI {rsi:.1f} + EMA50<EMA200\nForza: {forza}%\nScadenza: 30m"
-
-    return False, f"Debole scartato RSI {rsi:.1f}"
-
-print("Bot V9.6 ULTRA FORTE avviato - TUTTO IL GIORNO")
-send_telegram("✅ *Bot V9.6 ULTRA FORTE attivo*\nTutto il giorno\nSolo segnali 85-90%\nRSI 30-42 BUY / 58-70 SELL + Doppia EMA")
+print("Bot V9.7 FIX avviato")
+send("✅ *Bot V9.7 FIXATO - Ora non si blocca più!*")
 
 while True:
     try:
-        # Tutto il giorno - nessun filtro orario
-        if time.time() - ultimo_segnale < COOLDOWN:
-            time.sleep(30)
-            continue
-
-        for pair in PAIRS:
-            try:
-                df = yf.download(pair, period="3d", interval="5m", progress=False, auto_adjust=True)
-                if len(df) < 210:
-                    continue
-                
-                close = df['Close']
-                rsi = float(RSIIndicator(close, window=14).rsi().iloc[-1])
-                ema50 = float(EMAIndicator(close, window=EMA_PERIOD).ema_indicator().iloc[-1])
-                ema200 = float(EMAIndicator(close, window=EMA_TREND).ema_indicator().iloc[-1])
-                price = float(close.iloc[-1])
-
-                forte, msg = is_strong_signal(rsi, price, ema50, ema200)
-                
-                if forte:
-                    testo = f"{msg}\nPair: {pair}\nPrezzo: {price:.5f}\nOra: {datetime.now().strftime('%H:%M:%S')}"
-                    send_telegram(testo)
-                    print(f"SEGNALE FORTE INVIATO: {pair} - {msg}")
-                    ultimo_segnale = time.time()
-                    break
-                else:
-                    print(f"{pair} {msg}")
-
-            except Exception as e:
-                print(f"Errore {pair}: {e}")
-                continue
-        
+        if time.time()-ultimo < 900: time.sleep(30); continue
+        for p in PAIRS:
+            df=yf.download(p, period="3d", interval="5m", progress=False, auto_adjust=True)
+            if len(df)<210: continue
+            c=df['Close']; rsi=float(RSIIndicator(c,14).rsi().iloc[-1])
+            ema50=float(EMAIndicator(c,50).ema_indicator().iloc[-1])
+            ema200=float(EMAIndicator(c,200).ema_indicator().iloc[-1])
+            price=float(c.iloc[-1])
+            forte=False; txt=""
+            if 30<=rsi<=42 and price>ema50 and ema50>ema200:
+                forte=True; txt=f"🟢 *BUY ULTRA FORTE {p}*\nRSI {rsi:.1f} | 90%\nPrezzo {price:.5f}"
+            elif 58<=rsi<=70 and price<ema50 and ema50<ema200:
+                forte=True; txt=f"🔴 *SELL ULTRA FORTE {p}*\nRSI {rsi:.1f} | 90%\nPrezzo {price:.5f}"
+            if forte:
+                send(txt); print(txt); ultimo=time.time(); break
+            else: print(f"{p} RSI {rsi:.1f} scartato")
         time.sleep(60)
-
-    except Exception as e:
-        print(f"Errore loop principale: {e}")
-        time.sleep(60)
+    except Exception as e: print(e); time.sleep(60)
