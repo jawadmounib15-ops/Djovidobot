@@ -26,7 +26,7 @@ def send(m):
     except:
         pass
 
-send("Bot V11 LIVE - Studia a 15 MINUTI preciso!")
+send("Bot V11.1 LIVE - 15 MINUTI - Regole allargate piano!")
 
 while True:
     try:
@@ -39,13 +39,13 @@ while True:
             ema200 = float(EMAIndicator(c, 200).ema_indicator().iloc[-1])
             rsi = float(RSIIndicator(c, 14).rsi().iloc[-1])
             price = float(c.iloc[-1])
-            
+
             signal = None
-            if price > ema50 and ema50 > ema200 and 35 < rsi < 60:
+            if price > ema50 and ema50 > ema200 and 30 < rsi < 68:
                 signal = f"BUY FORTE 15MIN {p} RSI {rsi:.0f} - Entra 15min"
-            elif price < ema50 and ema50 < ema200 and 40 < rsi < 65:
+            elif price < ema50 and ema50 < ema200 and 32 < rsi < 70:
                 signal = f"SELL FORTE 15MIN {p} RSI {rsi:.0f} - Entra 15min"
-            
+
             if signal:
                 send(signal)
             time.sleep(3)
