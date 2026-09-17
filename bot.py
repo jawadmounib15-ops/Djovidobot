@@ -1,80 +1,68 @@
-import yfinance as yf
-import os, time, threading, requests
-import pandas as pd
+import threading, time, requests, os
 from flask import Flask
-
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-COPPIE = [
- "EURUSD=X",
- "GBPUSD=X",
- "USDJPY=X",
- "EURJPY=X",
- "EURCAD=X",
- "USDCHF=X",
- "AUDUSD=X",
- "EURGBP=X"
-]
+import yfinance as yf
+import pandas as pd
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "V9.3 ONLINE"
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT = os.getenv("TELEGRAM_CHAT")
 
-last_global = 0
-
-def send(m):
+def send_telegram(msg):
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": m}, timeout=10)
-    except:
-        pass
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT, "text": msg}, timeout=10)
+        print(f"INVIATO: {msg}", flush=True)
+    except Exception as e:
+        print(f"ERRORE TELEGRAM: {e}", flush=True)
 
-def loop():
-    global last_global
-    send("✅ V9.3 SICURO ONLINE - 8 coppie, max 1 ogni 15min, RSI 60/40")
+def check_pair(symbol):
+    try:
+        data = yf.download(symbol+"=X", period="1d", interval="5m", progress=False)
+        if len(data) < 50: return None
+        # RSI semplice
+        delta = data['Close'].diff()
+        gain = delta.where(delta>0,0).rolling(14).mean()
+        loss = -delta.where(delta<0,0).rolling(14).mean()
+        rs = gain/loss
+        rsi = 100 - (100/(1+rs))
+        last_rsi = float(rsi.iloc[-1])
+        price = float(data['Close'].iloc[-1])
+        print(f"CHECK {symbol} RSI={last_rsi:.1f} PRICE={price}", flush=True)
+        if last_rsi > 60:
+            return f"🟢 BUY SICURO {symbol} RSI {last_rsi:.1f} PRICE {price:.5f}"
+        if last_rsi < 40:
+            return f"🔴 SELL SICURO {symbol} RSI {last_rsi:.1f} PRICE {price:.5f}"
+        return None
+    except Exception as e:
+        print(f"ERRORE {symbol}: {e}", flush=True)
+        return None
+
+def run_bot():
+    print("MOTORE AVVIATO...", flush=True)
+    send_telegram("V9.3.1 ONLINE - MOTORE FIX")
+    pairs = ["EURUSD","GBPUSD","USDJPY","EURGBP","EURJPY","GBPJPY","AUDUSD","USDCHF"]
     while True:
-        if time.time() - last_global < 900:
+        try:
+            print("--- NUOVA SCANSIONE ---", flush=True)
+            for p in pairs:
+                signal = check_pair(p)
+                if signal:
+                    send_telegram(signal)
+                    print("ATTESA 15 MIN DOPO SEGNALE", flush=True)
+                    time.sleep(900) # 15 min
+                    break
             time.sleep(60)
-            continue
-        candidati = []
-        for pair in COPPIE:
-            try:
-                df = yf.download(pair, period="5d", interval="15m", progress=False, auto_adjust=True)
-                if len(df) < 210:
-                    continue
-                c = df['Close']
-                if isinstance(c, pd.DataFrame):
-                    c = c.iloc[:,0]
-                close = float(c.iloc[-1])
-                prev = float(c.iloc[-2])
-                o = df['Open']
-                if isinstance(o, pd.DataFrame):
-                    o = o.iloc[:,0]
-                open_price = float(o.iloc[-1])
-                ema50 = float(c.ewm(span=50).mean().iloc[-1])
-                ema200 = float(c.ewm(span=200).mean().iloc[-1])
-                delta = c.diff()
-                gain = delta.where(delta>0,0).rolling(14).mean()
-                loss = -delta.where(delta<0,0).rolling(14).mean()
-                rsi = float(100-(100/(1+gain.iloc[-1]/loss.iloc[-1])))
-                if abs(close-open_price)/close*100 < 0.02:
-                    continue
-                score = abs(close-ema50)/close*100 + abs(rsi-50)/10
-                if prev < ema50 and close > ema50 and close > ema200 and rsi >= 60:
-                    candidati.append((score, f"🟢 BUY SICURO {pair.replace('=X','')} @ {close:.5f} RSI:{rsi:.0f}"))
-                elif prev > ema50 and close < ema50 and close < ema200 and rsi <= 40:
-                    candidati.append((score, f"🔴 SELL SICURO {pair.replace('=X','')} @ {close:.5f} RSI:{rsi:.0f}"))
-            except:
-                continue
-        if candidati:
-            candidati.sort(reverse=True)
-            send(candidati[0][1])
-            last_global = time.time()
-        time.sleep(120)
+        except Exception as e:
+            print(f"ERRORE LOOP: {e}", flush=True)
+            time.sleep(30)
 
-threading.Thread(target=loop, daemon=True).start()
+@app.route("/")
+def home():
+    return "V9.3.1 ONLINE - MOTORE FIX"
+
+# AVVIO THREAD
+threading.Thread(target=run_bot, daemon=True).start()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(host="0.0.0.0", port=10000)
