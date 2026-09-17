@@ -5,7 +5,7 @@ from ta.trend import EMAIndicator
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT = os.getenv("CHAT_ID")
+CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 def keep_alive():
     class H(BaseHTTPRequestHandler):
