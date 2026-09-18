@@ -8,16 +8,20 @@ from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-ENGULFING = 0.60
-ENGULFING_MAX = 2.00
-COPPIE_YF = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURGBP=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURCAD=X","GBPCHF=X","EURCHF=X","AUDCAD=X","GBPCAD=X","EURAUD=X","GBPAUD=X","AUDCHF=X","CADJPY=X","CHFJPY=X","EURTRY=X","USDTRY=X"]
-COPPIE_POCKET = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CAD","EUR/GBP","EUR/JPY","GBP/JPY","AUD/JPY","EUR/CAD","GBP/CHF","EUR/CHF","AUD/CAD","GBP/CAD","EUR/AUD","GBP/AUD","AUD/CHF","CAD/JPY","CHF/JPY","EUR/TRY","USD/TRY"]
+
+# V13.1 - 3 REGOLE STRETTE SICURE
+ENGULFING = 0.80
+ENGULFING_MAX = 1.50
+BODY_MIN_PCT = 0.0003 # corpo minimo 0.03% per evitare doji
+
+COPPIE_YF = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURGBP=X","EURJPY=X","GBPJPY=X"]
+COPPIE_POCKET = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CAD","EUR/GBP","EUR/JPY","GBP/JPY"]
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot 80% LIVE - REGOLE VERE - NO OTC NOTTE", 200
+    return "Bot 80% LIVE - V13.1 STRETTA - NO OTC NOTTE", 200
 
 def manda_telegram(messaggio):
     try:
@@ -29,9 +33,9 @@ def manda_telegram(messaggio):
 def analizza():
     ora = datetime.now().hour
     if ora >= 23 or ora < 5:
-        print(f"[{ora}:00] NOTTE - REGOLA 1 - STOP OTC Pa!")
+        print(f"[{ora}:00] NOTTE - STOP OTC Pa!")
         return
-    print(f">>> Giro 21 coppie - Filtro {ENGULFING}")
+    print(f">>> Giro {len(COPPIE_YF)} coppie - Filtro {ENGULFING}-{ENGULFING_MAX}")
     for i, simbolo_yf in enumerate(COPPIE_YF):
         nome = COPPIE_POCKET[i]
         try:
@@ -40,30 +44,41 @@ def analizza():
             ema50 = df['Close'].ewm(span=50).mean().iloc[-1].item()
             ema200 = df['Close'].ewm(span=200).mean().iloc[-1].item()
             trend = "BUY" if ema50 > ema200 else "SELL"
+
             ultima = df.iloc[-1]
             prec = df.iloc[-2]
             def get_val(c, col):
                 v = c[col]
                 return float(v.iloc[0] if hasattr(v, 'iloc') else v)
+
             corpo_ult = abs(get_val(ultima, 'Close') - get_val(ultima, 'Open'))
             corpo_prec = abs(get_val(prec, 'Close') - get_val(prec, 'Open'))
             if corpo_prec == 0: continue
+
+            # REGOLA 1 STRETTA - Ratio 0.80-1.50
             rapporto = corpo_ult / corpo_prec
+            if rapporto < ENGULFING or rapporto > ENGULFING_MAX:
+                continue
+
+            # REGOLA 2 STRETTA - No doji, corpo minimo
+            if corpo_ult < BODY_MIN_PCT:
+                continue
+
+            # REGOLA 3 STRETTA - Engulfing + Trend uguale
             close_u = get_val(ultima, 'Close')
             open_u = get_val(ultima, 'Open')
-            engulf = None
-            if rapporto >= ENGULFING:
-                engulf = "BUY" if close_u > open_u else "SELL"
+            engulf = "BUY" if close_u > open_u else "SELL"
+
             if engulf and trend == engulf:
-                msg = f"✅ SEGNALE SICURO 99% - {nome} - {trend}\nRatio: {rapporto:.2f}"
+                msg = f"✅ SEGNALE SICURO 80% - {nome} - {trend}\nRatio: {rapporto:.2f}"
                 print(msg)
                 manda_telegram(msg)
         except Exception as e:
             print(f"Errore {nome}: {e}")
 
 def run_bot():
-    print("V13 AVVIATO - REGOLE VERE")
-    manda_telegram("✅ V13 AVVIATO - REGOLE VERE - NO OTC NOTTE")
+    print("V13.1 AVVIATO - REGOLE STRETTE")
+    manda_telegram("✅ V13.1 AVVIATO - REGOLE STRETTE - NO OTC NOTTE")
     while True:
         analizza()
         print("Giro finito, aspetto 5 min...")
