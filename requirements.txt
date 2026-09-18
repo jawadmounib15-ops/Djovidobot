@@ -1,5 +1,3 @@
 yfinance
+Flask
 requests
-flask
-gunicorn
-pytz
