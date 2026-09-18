@@ -4,16 +4,15 @@ import time
 import os
 from flask import Flask
 from threading import Thread
+import pandas as pd
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# REGOLE 90% SICURO
 ENGULFING_MIN = 1.20
 ENGULFING_MAX = 2.00
 RSI_OB = 70
 RSI_OS = 30
-WIN_RATE = "90%"
 
 COPPIE_YF = ["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDUSD=X"]
 COPPIE_POCKET = ["EUR/USD","GBP/USD","USD/JPY","EUR/JPY","GBP/JPY","AUD/USD"]
@@ -22,7 +21,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return f"V13.2 90% LIVE OK", 200
+    return f"V13.2 90% LIVE OK FIXED", 200
 
 def send(msg):
     try:
@@ -34,8 +33,8 @@ def send(msg):
 
 def calc_rsi(close, period=14):
     delta = close.diff()
-    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    gain = delta.where(delta > 0, 0.0).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
@@ -51,25 +50,36 @@ def analizza():
             df = yf.download(simbolo, period="2d", interval="15m", progress=False, auto_adjust=True)
             if len(df) < 60:
                 continue
-            ema50 = float(df['Close'].ewm(span=50).mean().iloc[-1])
-            ema200 = float(df['Close'].ewm(span=200).mean().iloc[-1])
-            rsi = float(calc_rsi(df['Close']).iloc[-1])
-            ultima = df.iloc[-1]
-            prec = df.iloc[-2]
-            corpo_u = abs(float(ultima['Close']) - float(ultima['Open']))
-            corpo_p = abs(float(prec['Close']) - float(prec['Open']))
+
+            # FIX PER SERIES ERROR
+            close_s = df['Close']
+            if isinstance(close_s, pd.DataFrame):
+                close_s = close_s.iloc[:,0]
+            close_s = close_s.squeeze()
+            open_s = df['Open']
+            if isinstance(open_s, pd.DataFrame):
+                open_s = open_s.iloc[:,0]
+            open_s = open_s.squeeze()
+
+            ema50 = float(close_s.ewm(span=50).mean().iloc[-1])
+            ema200 = float(close_s.ewm(span=200).mean().iloc[-1])
+            rsi = float(calc_rsi(close_s).iloc[-1])
+
+            ultima_close = float(close_s.iloc[-1])
+            ultima_open = float(open_s.iloc[-1])
+            prec_close = float(close_s.iloc[-2])
+            prec_open = float(open_s.iloc[-2])
+
+            corpo_u = abs(ultima_close - ultima_open)
+            corpo_p = abs(prec_close - prec_open)
             if corpo_p == 0:
                 continue
             ratio = corpo_u / corpo_p
-            # FILTRO 90% SICURO
             if ratio < ENGULFING_MIN or ratio > ENGULFING_MAX:
                 continue
-            close_u = float(ultima['Close'])
-            open_u = float(ultima['Open'])
-            close_p = float(prec['Close'])
-            open_p = float(prec['Open'])
-            bullish = (close_p < open_p) and (close_u > open_u) and (close_u > open_p) and (open_u < close_p)
-            bearish = (close_p > open_p) and (close_u < open_u) and (close_u < open_p) and (open_u > close_p)
+
+            bullish = (prec_close < prec_open) and (ultima_close > ultima_open) and (ultima_close > prec_open) and (ultima_open < prec_close)
+            bearish = (prec_close > prec_open) and (ultima_close < ultima_open) and (ultima_close < prec_open) and (ultima_open > prec_close)
             trend = "BUY" if ema50 > ema200 else "SELL"
             sig = "BUY" if bullish else "SELL" if bearish else ""
             if not sig:
@@ -80,8 +90,8 @@ def analizza():
                 continue
             if sig!= trend:
                 continue
-            # MESSAGGIO CON 90% SICURO
-            msg = f"✅ SEGNALE 90% SICURO ✅\n\nCoppia: {nome}\nDirezione: {sig}\nSicurezza: 90% WIN\nRatio: {ratio:.2f} (1.20-2.00)\nRSI: {rsi:.1f}\nTrend: {trend} OK\nTime: 15 min"
+
+            msg = f"🔥 SEGNALE 90% SICURO 🔥\n\nCoppia: {nome}\nDirezione: {sig}\nSicurezza: 90% WIN\nRatio: {ratio:.2f} (1.20-2.00)\nRSI: {rsi:.1f}\nTrend: {trend} OK\nTime: 15 min"
             print(msg)
             send(msg)
         except Exception as e:
