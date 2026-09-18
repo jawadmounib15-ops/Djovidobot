@@ -66,8 +66,8 @@ def run_bot():
     manda_telegram("✅ V13 AVVIATO - REGOLE VERE - NO OTC NOTTE")
     while True:
         analizza()
-        print("Giro finito, aspetto 15 min...")
-        time.sleep(900)
+        print("Giro finito, aspetto 5 min...")
+        time.sleep(300)
 
 Thread(target=run_bot, daemon=True).start()
 
