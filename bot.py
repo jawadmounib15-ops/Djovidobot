@@ -4,23 +4,18 @@ from flask import Flask
 import threading, time
 from datetime import datetime
 
-# Usiamo i nomi che hai messo tu su Render
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Coppie V.I.P - solo mercato reale, no OTC
 PAIRS = {
 "EURUSD=X": "EUR/USD",
 "GBPUSD=X": "GBP/USD", 
 "USDJPY=X": "USD/JPY",
 "USDCHF=X": "USD/CHF",
 "AUDUSD=X": "AUD/USD",
-"NZDUSD=X": "NZD/USD",
 "EURJPY=X": "EUR/JPY",
 "GBPJPY=X": "GBP/JPY",
-"USDCAD=X": "USD/CAD",
-"GC=F": "GOLD",
-"SI=F": "SILVER"
+"GC=F": "GOLD"
 }
 
 app = Flask(__name__)
@@ -41,51 +36,43 @@ def rsi_calc(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def check_signal():
-    # NO OTC NOTTE: non tradare 22:00 - 06:00 ora italiana
     now_hour = datetime.now().hour
-    if now_hour >= 22 or now_hour <= 6:
-        print("Notte - NO OTC - pausa")
+    if now_hour >= 23 or now_hour < 5:
+        print(f"Pausa {now_hour}:00 - 23h-05h")
         return
 
     for sym, name in PAIRS.items():
         try:
             df = yf.download(sym, period="5d", interval="15m", progress=False)
             if len(df) < 60: continue
-            
             close = df['Close']
             rsi = rsi_calc(close).iloc[-1]
             ema20 = close.ewm(span=20).mean().iloc[-1]
             ema50 = close.ewm(span=50).mean().iloc[-1]
             price = float(close.iloc[-1])
-            
-            # EMA TREND
             up_trend = ema20 > ema50
             down_trend = ema20 < ema50
-            
-            # RSI 70/30 + EMA per 90% WIN
             ratio = round(abs(ema20 - ema50) / price * 1000, 2)
 
-            if rsi < 35 and up_trend and ratio > 0.5:
-                send(f"🔥 <b>{name} BUY</b>\nRatio {ratio} RSI {round(rsi,1)}\nEMA Trend UP ✅\nObiettivo: 90% WIN")
-            elif rsi > 65 and down_trend and ratio > 0.5:
-                send(f"🔥 <b>{name} SELL</b>\nRatio {ratio} RSI {round(rsi,1)}\nEMA Trend DOWN ✅\nObiettivo: 90% WIN")
-                
-        except Exception as e:
-            print(f"Err {name}: {e}")
-            continue
+            # V15.5 STRETTA - poco meno di V15.4
+            if rsi < 38 and up_trend and ratio > 0.35:
+                send(f"🔥 <b>{name} BUY</b>\nRatio {ratio} RSI {round(rsi,1)}\nEMA UP ✅\nV15.5 STRETTA")
+            elif rsi > 62 and down_trend and ratio > 0.35:
+                send(f"🔥 <b>{name} SELL</b>\nRatio {ratio} RSI {round(rsi,1)}\nEMA DOWN ✅\nV15.5 STRETTA")
+        except: continue
 
 def loop():
     time.sleep(5)
-    send("✅ <b>BOT V15.4 V.I.P AVVIATO</b>\n- RSI 70/30\n- EMA Trend\n- NO OTC notte\nObiettivo: 90% WIN")
+    send("✅ <b>BOT V15.5 STRETTA AVVIATO</b>\n- RSI 38/62\n- Ratio >0.35\n- Pausa 23h-05h\nObiettivo 90% WIN")
     while True:
         check_signal()
-        time.sleep(300) # controllo ogni 5 minuti per segnali buoni
+        time.sleep(240)
 
 threading.Thread(target=loop, daemon=True).start()
 
 @app.route("/")
 def home():
-    return "BOT V15.4 V.I.P LIVE - 90% WIN"
+    return "BOT V15.5 STRETTA LIVE"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
