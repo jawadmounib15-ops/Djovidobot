@@ -1,4 +1,5 @@
-   gunicorn
-   flask
-   yfinance
-   requests 
+yfinance
+requests
+flask
+gunicorn
+pytz
