@@ -37,12 +37,10 @@ def get_signal(symbol):
         if isinstance(df1h.columns, pd.MultiIndex): df1h.columns=df1h.columns.get_level_values(0)
         df15['RSI']=get_rsi(df15['Close'])
         df15['VOL_AVG']=df15['Volume'].rolling(20).mean()
-
         trend15=check_trend(df15)
         trend1h=check_trend(df1h)
         if not trend15 or not trend1h: return None
         if trend15 != trend1h: return None
-
         last=df15.iloc[-1]; prev=df15.iloc[-2]
         rsi=float(last['RSI'])
         body_curr=abs(float(last['Close'])-float(last['Open']))
@@ -51,32 +49,5 @@ def get_signal(symbol):
         ratio=body_curr/body_prev
         if not (1.3 <= ratio <= 2.2): return None
         if float(last['Volume']) < float(last['VOL_AVG'])*0.8: return None
-
         if trend15=="BUY":
             is_bullish = float(prev['Close'])<float(prev['Open']) and float(last['Close'])>float(last['Open']) and float(last['Close'])>float(prev['Open'])
-            if is_bullish and 50 <= rsi <= 68:
-                return f"BUY PRO {ratio:.2f} RSI {rsi:.1f} 1h+15m {trend15}"
-        else:
-            is_bearish = float(prev['Close'])>float(prev['Open']) and float(last['Close'])<float(last['Open']) and float(last['Close'])<float(prev['Open'])
-            if is_bearish and 32 <= rsi <= 50:
-                return f"SELL PRO {ratio:.2f} RSI {rsi:.1f} 1h+15m {trend15}"
-        return None
-    except Exception as e:
-        print(e); return None
-
-def loop_bot():
-    send("BOT V15.1 PRO AVVIATO - Doppio Trend 1h+15m + Volume - Solo segnali buoni")
-    while True:
-        hour=datetime.now().hour
-        if 8 <= hour <= 21:
-            for sym,name in PAIRS.items():
-                sig=get_signal(sym)
-                if sig: send(f"{name} {sig}")
-                time.sleep(3)
-        time.sleep(300)
-
-@app.route('/')
-def home(): return "V15.1 PRO LIVE",200
-if __name__=='__main__':
-    threading.Thread(target=loop_bot,daemon=True).start()
-    app.run(host='0.0.0.0',port=int(os.environ.get("PORT",10000)))
