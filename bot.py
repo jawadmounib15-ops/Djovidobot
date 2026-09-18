@@ -1,167 +1,123 @@
 import yfinance as yf
-import time
 import requests
+import time
+import os
+from threading import Thread
+from flask import Flask
 from datetime import datetime
-import pytz
-import pandas as pd
 
-# === CONFIG V13.2 SICURO - 7-8 WIN SU 10 ===
-TELEGRAM_TOKEN = "INSERISCI_QUI_IL_TUO_TOKEN"
-TELEGRAM_CHAT_ID = "INSERISCI_QUI_CHAT_ID"
-INTERVAL = "15m"
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# REGOLA D'ORO SICURA - QUESTA E' LA CORREZIONE PA
-ENGULFING_MIN = 1.20
+# V13.2 - 4 REGOLE SICURE
+ENGULFING = 1.20
 ENGULFING_MAX = 2.00
-EMA_PERIOD = 50
-RSI_PERIOD = 14
-RSI_OVERBOUGHT = 70
-RSI_OVERSOLD = 30
+BODY_MIN_PCT = 0.0003
+RSI_OB = 70
+RSI_OS = 30
 
-PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "EUR/JPY", "AUD/USD", "GBP/JPY", "EUR/GBP", "USD/CHF", "AUD/JPY", "EUR/AUD"]
-YF_MAP = {
-    "EUR/USD": "EURUSD=X",
-    "GBP/USD": "GBPUSD=X",
-    "USD/JPY": "JPY=X",
-    "EUR/JPY": "EURJPY=X",
-    "AUD/USD": "AUDUSD=X",
-    "GBP/JPY": "GBPJPY=X",
-    "EUR/GBP": "EURGBP=X",
-    "USD/CHF": "CHF=X",
-    "AUD/JPY": "AUDJPY=X",
-    "EUR/AUD": "EURAUD=X"
-}
+COPPIE_YF = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURGBP=X","EURJPY=X","GBPJPY=X"]
+COPPIE_POCKET = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CAD","EUR/GBP","EUR/JPY","GBP/JPY"]
 
-def send_telegram(msg):
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot 80% LIVE - V13.2 SICURA - NO OTC NOTTE", 200
+
+def manda_telegram(messaggio):
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
-        requests.post(url, data=payload, timeout=10)
-        print(f"Inviato: {msg}")
-    except Exception as e:
-        print(f"Telegram error: {e}")
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": messaggio}, timeout=10)
+    except:
+        pass
 
-def calc_rsi(df, period=14):
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+def calc_rsi(close, period=14):
+    delta = close.diff()
+    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+    return 100 - (100 / (1 + rs))
 
-def check_signal(pair):
-    try:
-        yf_symbol = YF_MAP.get(pair)
-        if not yf_symbol:
-            return None
-            
-        df = yf.download(yf_symbol, period="5d", interval=INTERVAL, progress=False, auto_adjust=False)
-        
-        if df.empty or len(df) < 60:
-            return None
-        
-        # Fix per yfinance che ritorna MultiIndex
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        
-        df['EMA50'] = df['Close'].ewm(span=EMA_PERIOD, adjust=False).mean()
-        df['RSI'] = calc_rsi(df, RSI_PERIOD)
-        
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
-        
-        open_last = float(last['Open'])
-        close_last = float(last['Close'])
-        open_prev = float(prev['Open'])
-        close_prev = float(prev['Close'])
-        ema_last = float(last['EMA50'])
-        rsi_last = float(last['RSI'])
-        
-        body_last = abs(close_last - open_last)
-        body_prev = abs(close_prev - open_prev)
-        
-        if body_prev == 0 or body_last == 0:
-            return None
-        
-        ratio = body_last / body_prev
-        
-        # FILTRO 1: Ratio sicuro 1.20-2.00 - BLOCCA 0.92 e 1.00
-        if ratio < ENGULFING_MIN or ratio > ENGULFING_MAX:
-            return None
-        
-        # FILTRO 2: Body deve essere > 60% della candela
-        range_last = float(last['High'] - last['Low'])
-        if range_last == 0 or (body_last / range_last) < 0.6:
-            return None
-            
-        # ENGULFING PATTERN
-        bullish_eng = (close_prev < open_prev) and (close_last > open_last) and (close_last > open_prev) and (open_last < close_prev)
-        bearish_eng = (close_prev > open_prev) and (close_last < open_last) and (close_last < open_prev) and (open_last > close_prev)
-        
-        signal = None
-        if bullish_eng:
-            # FILTRO 3: RSI non ipercomprato
-            if rsi_last > RSI_OVERBOUGHT:
-                print(f"{pair} BUY bloccato RSI alto {rsi_last}")
-                return None
-            # FILTRO 4: Sopra EMA
-            if close_last < ema_last:
-                return None
-            signal = "BUY"
-            
-        elif bearish_eng:
-            # FILTRO 3: RSI non ipervenduto
-            if rsi_last < RSI_OVERSOLD:
-                print(f"{pair} SELL bloccato RSI basso {rsi_last}")
-                return None
-            # FILTRO 4: Sotto EMA
-            if close_last > ema_last:
-                return None
-            signal = "SELL"
-        else:
-            return None
-            
-        return {
-            "pair": pair,
-            "signal": signal,
-            "ratio": round(ratio, 2),
-            "rsi": round(rsi_last, 1),
-            "price": round(close_last, 5)
-        }
-    except Exception as e:
-        print(f"Errore {pair}: {e}")
-        return None
-
-def main():
-    print("=== BOT V13.2 SICURO AVVIATO ===")
-    print(f"Ratio: {ENGULFING_MIN}-{ENGULFING_MAX} | Interval: {INTERVAL}")
-    send_telegram("✅ *V13.2 SICURO AVVIATO*\nRatio: 1.20-2.00\nFiltri: RSI + EMA50 + Body 60%\nObiettivo: 7-8 WIN su 10")
-    
-    while True:
+def analizza():
+    ora = datetime.now().hour
+    if ora >= 23 or ora < 5:
+        print(f"{ora}:00 NOTTE - STOP OTC Pa!")
+        return
+    print(f">>> Giro {len(COPPIE_YF)} coppie - Filtro {ENGULFING}-{ENGULFING_MAX} + RSI")
+    for i, simbolo_yf in enumerate(COPPIE_YF):
+        nome = COPPIE_POCKET[i]
         try:
-            now = datetime.now(pytz.timezone('Europe/Rome'))
-            # Pausa notte - no OTC
-            if now.hour >= 22 or now.hour < 8:
-                print(f"[{now.strftime('%H:%M')}] Notte - pausa OTC")
-                time.sleep(600)
+            df = yf.download(simbolo_yf, period="3d", interval="15m", progress=False, auto_adjust=True)
+            if len(df) < 200:
                 continue
-                
-            print(f"\n[{now.strftime('%H:%M:%S')}] Scansione {len(PAIRS)} coppie...")
-            
-            for pair in PAIRS:
-                res = check_signal(pair)
-                if res:
-                    msg = f"✅ *SEGNALE SICURO 90%*\n\nCoppia: {res['pair']}\nDirezione: *{res['signal']}*\nPrezzo: {res['price']}\nRatio: {res['ratio']} (sicuro)\nRSI: {res['rsi']}\nTime: 15 min"
-                    print(f"SEGNALE TROVATO: {res}")
-                    send_telegram(msg)
-                time.sleep(2)
-                
-            print("Attesa 5 min...")
-            time.sleep(300)
-            
+            ema50 = df['Close'].ewm(span=50).mean().iloc[-1].item()
+            ema200 = df['Close'].ewm(span=200).mean().iloc[-1].item()
+            rsi = calc_rsi(df['Close']).iloc[-1].item()
+            trend = "BUY" if ema50 > ema200 else "SELL"
+
+            ultima = df.iloc[-1]
+            prec = df.iloc[-2]
+            def get_val(c, col):
+                v = c[col]
+                return float(v.iloc[0] if hasattr(v, 'iloc') else v)
+
+            corpo_ult = abs(get_val(ultima, 'Close') - get_val(ultima, 'Open'))
+            corpo_prec = abs(get_val(prec, 'Close') - get_val(prec, 'Open'))
+            if corpo_prec == 0:
+                continue
+
+            # REGOLA 1 - Ratio 1.20-2.00
+            rapporto = corpo_ult / corpo_prec
+            if rapporto < ENGULFING or rapporto > ENGULFING_MAX:
+                continue
+
+            # REGOLA 2 - No doji
+            if corpo_ult < BODY_MIN_PCT:
+                continue
+
+            # REGOLA 3 - VERO ENGULFING + TREND
+            close_u = get_val(ultima, 'Close')
+            open_u = get_val(ultima, 'Open')
+            close_p = get_val(prec, 'Close')
+            open_p = get_val(prec, 'Open')
+
+            bullish_eng = (close_p < open_p) and (close_u > open_u) and (close_u > open_p) and (open_u < close_p)
+            bearish_eng = (close_p > open_p) and (close_u < open_u) and (close_u < open_p) and (open_u > close_p)
+
+            engulf = ""
+            if bullish_eng:
+                engulf = "BUY"
+            elif bearish_eng:
+                engulf = "SELL"
+            else:
+                continue
+
+            # REGOLA 4 - RSI ANTI-PICCO - NUOVA!
+            if engulf == "BUY" and rsi > RSI_OB:
+                print(f"{nome} BUY bloccato RSI {rsi:.1f} troppo alto")
+                continue
+            if engulf == "SELL" and rsi < RSI_OS:
+                print(f"{nome} SELL bloccato RSI {rsi:.1f} troppo basso")
+                continue
+
+            if engulf and trend == engulf:
+                msg = f"✅ SEGNALE SICURO 90% - {nome} - {trend}\nRatio: {rapporto:.2f} | RSI: {rsi:.1f}"
+                print(msg)
+                manda_telegram(msg)
         except Exception as e:
-            print(f"Errore main loop: {e}")
-            time.sleep(60)
+            print(f"Errore {nome}: {e}")
+
+def run_bot():
+    print("V13.2 AVVIATO - REGOLA SICURA + RSI")
+    manda_telegram("✅ V13.2 AVVIATO - REGOLA SICURA 1.20-2.00 + VERO ENGULFING + RSI - NO OTC NOTTE")
+    while True:
+        analizza()
+        print("Giro finito, aspetto 5 min...")
+        time.sleep(300)
+
+Thread(target=run_bot, daemon=True).start()
 
 if __name__ == "__main__":
-    main()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
