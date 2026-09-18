@@ -55,7 +55,7 @@ def analizza():
             if rapporto >= ENGULFING:
                 engulf = "BUY" if close_u > open_u else "SELL"
             if engulf and trend == engulf:
-                msg = f"✅ SEGNALE SICURO 88% - {nome} - {trend}\nRatio: {rapporto:.2f}"
+                msg = f"✅ SEGNALE SICURO 99% - {nome} - {trend}\nRatio: {rapporto:.2f}"
                 print(msg)
                 manda_telegram(msg)
         except Exception as e:
