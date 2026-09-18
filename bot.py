@@ -28,7 +28,7 @@ def manda_telegram(messaggio):
 
 def analizza():
     ora = datetime.now().hour
-    if ora >= 22 or ora < 8:
+    if ora >= 23 or ora < 5:
         print(f"[{ora}:00] NOTTE - REGOLA 1 - STOP OTC Pa!")
         return
     print(f">>> Giro 21 coppie - Filtro {ENGULFING}")
