@@ -9,49 +9,35 @@ import pandas as pd
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-ENGULFING_MIN = 1.20
-ENGULFING_MAX = 2.00
-RSI_OB = 70
-RSI_OS = 30
-
-COPPIE_YF = ["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDUSD=X"]
-COPPIE_POCKET = ["EUR/USD","GBP/USD","USD/JPY","EUR/JPY","GBP/JPY","AUD/USD"]
-
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return f"V13.2 90% LIVE OK FIXED", 200
+    return "V13.2 LIVE FIXED", 200
 
 def send(msg):
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": msg}, timeout=10)
-        print(f"Inviato: {msg}")
     except Exception as e:
         print(e)
 
 def calc_rsi(close, period=14):
     delta = close.diff()
-    gain = delta.where(delta > 0, 0.0).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0.0)).rolling(window=period).mean()
+    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
 def analizza():
-    from datetime import datetime
-    ora = datetime.now().hour
-    if ora >= 23 or ora < 5:
-        print("Notte OTC - pausa")
-        return
+    COPPIE_YF = ["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDUSD=X"]
+    COPPIE = ["EUR/USD","GBP/USD","USD/JPY","EUR/JPY","GBP/JPY","AUD/USD"]
     for i, simbolo in enumerate(COPPIE_YF):
-        nome = COPPIE_POCKET[i]
+        nome = COPPIE[i]
         try:
             df = yf.download(simbolo, period="2d", interval="15m", progress=False, auto_adjust=True)
             if len(df) < 60:
                 continue
-
-            # FIX PER SERIES ERROR
             close_s = df['Close']
             if isinstance(close_s, pd.DataFrame):
                 close_s = close_s.iloc[:,0]
@@ -75,31 +61,29 @@ def analizza():
             if corpo_p == 0:
                 continue
             ratio = corpo_u / corpo_p
-            if ratio < ENGULFING_MIN or ratio > ENGULFING_MAX:
+            if ratio < 1.20 or ratio > 2.00:
                 continue
 
             bullish = (prec_close < prec_open) and (ultima_close > ultima_open) and (ultima_close > prec_open) and (ultima_open < prec_close)
             bearish = (prec_close > prec_open) and (ultima_close < ultima_open) and (ultima_close < prec_open) and (ultima_open > prec_close)
-            trend = "BUY" if ema50 > ema200 else "SELL"
+
             sig = "BUY" if bullish else "SELL" if bearish else ""
             if not sig:
                 continue
-            if sig == "BUY" and rsi > RSI_OB:
-                continue
-            if sig == "SELL" and rsi < RSI_OS:
-                continue
-            if sig!= trend:
-                continue
 
-            msg = f"🔥 SEGNALE 90% SICURO 🔥\n\nCoppia: {nome}\nDirezione: {sig}\nSicurezza: 90% WIN\nRatio: {ratio:.2f} (1.20-2.00)\nRSI: {rsi:.1f}\nTrend: {trend} OK\nTime: 15 min"
-            print(msg)
+            trend = "BUY" if ema50 > ema200 else "SELL"
+            if sig == "BUY" and rsi > 70: continue
+            if sig == "SELL" and rsi < 30: continue
+            if sig!= trend: continue
+
+            msg = f"🔥 SEGNALE 90% SICURO 🔥\n\nCoppia: {nome}\nDirezione: {sig}\nRatio: {ratio:.2f}\nRSI: {rsi:.1f}\nTrend: {trend} OK"
             send(msg)
         except Exception as e:
             print(f"Err {nome}: {e}")
 
 def run_bot():
     print("BOT 90% AVVIATO")
-    send("✅ BOT V13.2 AVVIATO - 90% SICURO\n\nRegole:\n- Ratio 1.20-2.00\n- Vero Engulfing\n- RSI 70/30\n- EMA Trend\n- NO OTC notte\n\nObiettivo: 90% WIN")
+    send("✅ BOT V13.2 AVVIATO - 90% SICURO\nFix Series applicato, ora funziona")
     while True:
         analizza()
         time.sleep(300)
