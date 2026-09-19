@@ -1,4 +1,8 @@
-import os, requests, time, yfinance as yf, pandas as pd
+import os
+import requests
+import time
+import yfinance as yf
+import pandas as pd
 from flask import Flask
 from threading import Thread
 from datetime import datetime, timedelta
@@ -7,12 +11,12 @@ app = Flask(__name__)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 PAIRS = {"EURUSD=X": "EUR/USD", "GBPUSD=X": "GBP/USD", "USDJPY=X": "USD/JPY", "EURJPY=X": "EUR/JPY", "GBPJPY=X": "GBP/JPY"}
-LAST_SIGNAL = {}
+LAST = {}
 
 def send(m):
     try:
         if TOKEN and CHAT:
-            requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT, "text": m}, timeout=10)
+            requests.post("https://api.telegram.org/bot" + TOKEN + "/sendMessage", data={"chat_id": CHAT, "text": m}, timeout=10)
     except:
         pass
 
@@ -25,39 +29,43 @@ def get_data(sym, interval, period):
     except:
         return pd.DataFrame()
 
-def ema(s, n): return s.ewm(span=n, adjust=False).mean()
-def sma(s, n): return s.rolling(n).mean()
+def ema(s, n):
+    return s.ewm(span=n, adjust=False).mean()
+
+def sma(s, n):
+    return s.rolling(n).mean()
+
 def rsi_calc(s, n=14):
     d = s.diff()
     g = d.where(d > 0, 0).rolling(n).mean()
     l = -d.where(d < 0, 0).rolling(n).mean()
     return 100 - (100 / (1 + g / l))
 
-def is_forex_open():
+def is_open():
     now = datetime.now()
     if now.weekday() >= 5:
         return False
     return True
 
-def format_msg(tipo, coppia, lavoro, motivo, prezzo):
+def make_msg(tipo, coppia, lavoro, motivo, prezzo):
     now = datetime.now()
-    expiry = now + timedelta(minutes=5)
-    icon = "🟢" if tipo=="BUY" else "🔴"
-    return f"""{icon} SEGNALE {tipo} - {coppia}
-💰 Prezzo: {prezzo:.5f}
-⏱️ Scadenza: 5 MINUTI
-🕐 Entrata: {now.strftime('%H:%M:%S')}
-📅 Scadenza alle: {expiry.strftime('%H:%M:%S')}
-🧠 Lavoro: {lavoro}
-📊 Motivo: {motivo}
-⚡️ Azione: Entra subito in {tipo}"""
+    exp = now + timedelta(minutes=5)
+    txt = tipo + " - " + coppia + "\n"
+    txt += "Prezzo: " + str(round(prezzo, 5)) + "\n"
+    txt += "Scadenza: 5 MINUTI\n"
+    txt += "Entrata: " + now.strftime("%H:%M:%S") + "\n"
+    txt += "Scadenza alle: " + exp.strftime("%H:%M:%S") + "\n"
+    txt += "Lavoro: " + lavoro + "\n"
+    txt += "Motivo: " + motivo + "\n"
+    txt += "Azione: Entra subito " + tipo
+    return txt
 
 def can_send(coppia, lavoro):
-    key = f"{coppia}_{lavoro}"
+    key = coppia + "_" + lavoro
     now = time.time()
-    if key in LAST_SIGNAL and now - LAST_SIGNAL[key] < 1800:
+    if key in LAST and now - LAST[key] < 1800:
         return False
-    LAST_SIGNAL[key] = now
+    LAST[key] = now
     return True
 
 def check(sym, name):
@@ -65,7 +73,8 @@ def check(sym, name):
     df_m15 = get_data(sym, "15m", "5d")
     df_m5 = get_data(sym, "5m", "3d")
     df_m1 = get_data(sym, "1m", "2d")
-    if len(df_m15) < 50 or len(df_m1) < 30: return []
+    if len(df_m15) < 50 or len(df_m1) < 30:
+        return []
     res = []
     c1 = float(df_m1["Close"].iloc[-1])
     o1 = float(df_m1["Open"].iloc[-1])
@@ -101,31 +110,59 @@ def check(sym, name):
     low_ago = float(df_m1["Low"].rolling(10).min().iloc[-11])
     high_ago = float(df_m1["High"].rolling(10).max().iloc[-11])
 
-    if e5_15 > e20_15 > e50_15 and pin_buy and can_send(name, "L1"):
-        res.append(format_msg("BUY", name, "L1 TREND", "3 EMA UP + Pinbar", c1))
-    if e5_15 < e20_15 < e50_15 and pin_sell and can_send(name, "L1"):
-        res.append(format_msg("SELL", name, "L1 TREND", "3 EMA DOWN + Pinbar", c1))
+    if e5_15 > e20_15 and e20_15 > e50_15 and pin_buy and can_send(name, "L1"):
+        res.append(make_msg("BUY", name, "L1 TREND", "3 EMA UP + Pinbar", c1))
+    if e5_15 < e20_15 and e20_15 < e50_15 and pin_sell and can_send(name, "L1"):
+        res.append(make_msg("SELL", name, "L1 TREND", "3 EMA DOWN + Pinbar", c1))
     if r_prev < 30 and r1 > 30 and l1 <= lower * 1.002 and can_send(name, "L2"):
-        res.append(format_msg("BUY", name, "L2 RIMBALZO", "RSI esce 30 + Bollinger", c1))
+        res.append(make_msg("BUY", name, "L2 RIMBALZO", "RSI 30 + Bollinger basso", c1))
     if r_prev > 70 and r1 < 70 and h1 >= upper * 0.998 and can_send(name, "L2"):
-        res.append(format_msg("SELL", name, "L2 RIMBALZO", "RSI esce 70 + Bollinger", c1))
+        res.append(make_msg("SELL", name, "L2 RIMBALZO", "RSI 70 + Bollinger alto", c1))
     if c1 > high20 and can_send(name, "L3"):
-        res.append(format_msg("BUY", name, "L3 BREAKOUT", f"Rottura MAX {high20:.5f}", c1))
+        res.append(make_msg("BUY", name, "L3 BREAKOUT", "Rottura MAX 20", c1))
     if c1 < low20 and can_send(name, "L3"):
-        res.append(format_msg("SELL", name, "L3 BREAKOUT", f"Rottura MIN {low20:.5f}", c1))
+        res.append(make_msg("SELL", name, "L3 BREAKOUT", "Rottura MIN 20", c1))
     if abs(c1 - s50_15) / c1 < 0.002 and eng_buy and e5_15 > e20_15 and can_send(name, "L4"):
-        res.append(format_msg("BUY", name, "L4 PULLBACK", "SMA50 + Engulfing UP", c1))
+        res.append(make_msg("BUY", name, "L4 PULLBACK", "SMA50 + Engulfing UP", c1))
     if abs(c1 - s50_15) / c1 < 0.002 and eng_sell and e5_15 < e20_15 and can_send(name, "L4"):
-        res.append(format_msg("SELL", name, "L4 PULLBACK", "SMA50 + Engulfing DOWN", c1))
+        res.append(make_msg("SELL", name, "L4 PULLBACK", "SMA50 + Engulfing DOWN", c1))
     if abs(low_ago - l1) / l1 < 0.001 and c1 > o1 and r1 > r_prev and can_send(name, "L5"):
-        res.append(format_msg("BUY", name, "L5 DOPPIO MIN", "Doppio minimo + RSI UP", c1))
+        res.append(make_msg("BUY", name, "L5 DOPPIO MIN", "Doppio minimo + RSI UP", c1))
     if abs(high_ago - h1) / h1 < 0.001 and c1 < o1 and r1 < r_prev and can_send(name, "L5"):
-        res.append(format_msg("SELL", name, "L5 DOPPIO MAX", "Doppio massimo + RSI DOWN", c1))
+        res.append(make_msg("SELL", name, "L5 DOPPIO MAX", "Doppio massimo + RSI DOWN", c1))
     if e5_1 > e20_1 and e5_1_prev < e20_1_prev and r1 > 45 and can_send(name, "L6"):
-        res.append(format_msg("BUY", name, "L6 CROSS", "Incrocio medie UP", c1))
+        res.append(make_msg("BUY", name, "L6 CROSS", "Incrocio medie UP", c1))
     if e5_1 < e20_1 and e5_1_prev > e20_1_prev and r1 < 55 and can_send(name, "L6"):
-        res.append(format_msg("SELL", name, "L6 CROSS", "Incrocio medie DOWN", c1))
+        res.append(make_msg("SELL", name, "L6 CROSS", "Incrocio medie DOWN", c1))
     if abs(c1 - daily_low) / c1 < 0.001 and (pin_buy or eng_buy) and can_send(name, "L7"):
-        res.append(format_msg("BUY", name, "L7 SUPPORTO", f"Supporto giorno {daily_low:.5f}", c1))
+        res.append(make_msg("BUY", name, "L7 SUPPORTO", "Supporto giornaliero", c1))
     if abs(c1 - daily_high) / c1 < 0.001 and (pin_sell or eng_sell) and can_send(name, "L7"):
-        res.append(format
+        res.append(make_msg("SELL", name, "L7 RESISTENZA", "Resistenza giornaliera", c1))
+    return res
+
+def loop():
+    send("V34 FINALE LIVE - 7 LAVORI - ANTI-SPAM - STOP WEEKEND")
+    while True:
+        try:
+            if not is_open():
+                time.sleep(300)
+                continue
+            for k, v in PAIRS.items():
+                sigs = check(k, v)
+                for s in sigs:
+                    send(s)
+                    time.sleep(5)
+            time.sleep(75)
+        except Exception as e:
+            print(e)
+            time.sleep(60)
+
+@app.route("/")
+def home():
+    return "V34 LIVE OK"
+
+Thread(target=loop, daemon=True).start()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
