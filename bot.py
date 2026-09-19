@@ -7,6 +7,7 @@ app = Flask(__name__)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 PAIRS = {"EURUSD=X": "EUR/USD", "GBPUSD=X": "GBP/USD", "USDJPY=X": "USD/JPY", "EURJPY=X": "EUR/JPY", "GBPJPY=X": "GBP/JPY"}
+LAST_SIGNAL = {}
 
 def send(m):
     try:
@@ -32,6 +33,12 @@ def rsi_calc(s, n=14):
     l = -d.where(d < 0, 0).rolling(n).mean()
     return 100 - (100 / (1 + g / l))
 
+def is_forex_open():
+    now = datetime.now()
+    if now.weekday() >= 5:
+        return False
+    return True
+
 def format_msg(tipo, coppia, lavoro, motivo, prezzo):
     now = datetime.now()
     expiry = now + timedelta(minutes=5)
@@ -44,6 +51,14 @@ def format_msg(tipo, coppia, lavoro, motivo, prezzo):
 🧠 Lavoro: {lavoro}
 📊 Motivo: {motivo}
 ⚡️ Azione: Entra subito in {tipo}"""
+
+def can_send(coppia, lavoro):
+    key = f"{coppia}_{lavoro}"
+    now = time.time()
+    if key in LAST_SIGNAL and now - LAST_SIGNAL[key] < 1800:
+        return False
+    LAST_SIGNAL[key] = now
+    return True
 
 def check(sym, name):
     df_h1 = get_data(sym, "60m", "10d")
@@ -86,52 +101,31 @@ def check(sym, name):
     low_ago = float(df_m1["Low"].rolling(10).min().iloc[-11])
     high_ago = float(df_m1["High"].rolling(10).max().iloc[-11])
 
-    if e5_15 > e20_15 > e50_15 and pin_buy:
-        res.append(format_msg("BUY", name, "L1 TREND", "3 EMA allineate UP + Pinbar rialzista", c1))
-    if e5_15 < e20_15 < e50_15 and pin_sell:
-        res.append(format_msg("SELL", name, "L1 TREND", "3 EMA allineate DOWN + Pinbar ribassista", c1))
-    if r_prev < 30 and r1 > 30 and l1 <= lower * 1.002:
-        res.append(format_msg("BUY", name, "L2 RIMBALZO", "RSI esce da 30 + tocco Bollinger inferiore", c1))
-    if r_prev > 70 and r1 < 70 and h1 >= upper * 0.998:
-        res.append(format_msg("SELL", name, "L2 RIMBALZO", "RSI esce da 70 + tocco Bollinger superiore", c1))
-    if c1 > high20:
-        res.append(format_msg("BUY", name, "L3 BREAKOUT", f"Rottura massimo 20 candele {high20:.5f}", c1))
-    if c1 < low20:
-        res.append(format_msg("SELL", name, "L3 BREAKOUT", f"Rottura minimo 20 candele {low20:.5f}", c1))
-    if abs(c1 - s50_15) / c1 < 0.002 and eng_buy and e5_15 > e20_15:
-        res.append(format_msg("BUY", name, "L4 PULLBACK", "Ritorno su SMA50 + Engulfing rialzista", c1))
-    if abs(c1 - s50_15) / c1 < 0.002 and eng_sell and e5_15 < e20_15:
-        res.append(format_msg("SELL", name, "L4 PULLBACK", "Ritorno su SMA50 + Engulfing ribassista", c1))
-    if abs(low_ago - l1) / l1 < 0.001 and c1 > o1 and r1 > r_prev:
-        res.append(format_msg("BUY", name, "L5 DOPPIO MIN", "Doppio minimo + RSI in risalita", c1))
-    if abs(high_ago - h1) / h1 < 0.001 and c1 < o1 and r1 < r_prev:
-        res.append(format_msg("SELL", name, "L5 DOPPIO MAX", "Doppio massimo + RSI in discesa", c1))
-    if e5_1 > e20_1 and e5_1_prev < e20_1_prev and r1 > 45:
-        res.append(format_msg("BUY", name, "L6 CROSS", "Incrocio medie M1 UP + RSI >45", c1))
-    if e5_1 < e20_1 and e5_1_prev > e20_1_prev and r1 < 55:
-        res.append(format_msg("SELL", name, "L6 CROSS", "Incrocio medie M1 DOWN + RSI <55", c1))
-    if abs(c1 - daily_low) / c1 < 0.001 and (pin_buy or eng_buy):
-        res.append(format_msg("BUY", name, "L7 SUPPORTO", f"Supporto giornaliero {daily_low:.5f}", c1))
-    if abs(c1 - daily_high) / c1 < 0.001 and (pin_sell or eng_sell):
-        res.append(format_msg("SELL", name, "L7 RESISTENZA", f"Resistenza giornaliera {daily_high:.5f}", c1))
-    return res
-
-def loop():
-    send("✅ V31 ULTIMATE LIVE - 7 LAVORI + MESSAGGIO DETTAGLIATO")
-    while True:
-        try:
-            for k, v in PAIRS.items():
-                for s in check(k, v):
-                    send(s)
-                    time.sleep(20)
-            time.sleep(75)
-        except Exception as e:
-            print(e)
-            time.sleep(60)
-
-@app.route("/")
-def home(): return "V31 LIVE - 7 LAVORI DETTAGLIATI"
-
-Thread(target=loop, daemon=True).start()
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    if e5_15 > e20_15 > e50_15 and pin_buy and can_send(name, "L1"):
+        res.append(format_msg("BUY", name, "L1 TREND", "3 EMA UP + Pinbar", c1))
+    if e5_15 < e20_15 < e50_15 and pin_sell and can_send(name, "L1"):
+        res.append(format_msg("SELL", name, "L1 TREND", "3 EMA DOWN + Pinbar", c1))
+    if r_prev < 30 and r1 > 30 and l1 <= lower * 1.002 and can_send(name, "L2"):
+        res.append(format_msg("BUY", name, "L2 RIMBALZO", "RSI esce 30 + Bollinger", c1))
+    if r_prev > 70 and r1 < 70 and h1 >= upper * 0.998 and can_send(name, "L2"):
+        res.append(format_msg("SELL", name, "L2 RIMBALZO", "RSI esce 70 + Bollinger", c1))
+    if c1 > high20 and can_send(name, "L3"):
+        res.append(format_msg("BUY", name, "L3 BREAKOUT", f"Rottura MAX {high20:.5f}", c1))
+    if c1 < low20 and can_send(name, "L3"):
+        res.append(format_msg("SELL", name, "L3 BREAKOUT", f"Rottura MIN {low20:.5f}", c1))
+    if abs(c1 - s50_15) / c1 < 0.002 and eng_buy and e5_15 > e20_15 and can_send(name, "L4"):
+        res.append(format_msg("BUY", name, "L4 PULLBACK", "SMA50 + Engulfing UP", c1))
+    if abs(c1 - s50_15) / c1 < 0.002 and eng_sell and e5_15 < e20_15 and can_send(name, "L4"):
+        res.append(format_msg("SELL", name, "L4 PULLBACK", "SMA50 + Engulfing DOWN", c1))
+    if abs(low_ago - l1) / l1 < 0.001 and c1 > o1 and r1 > r_prev and can_send(name, "L5"):
+        res.append(format_msg("BUY", name, "L5 DOPPIO MIN", "Doppio minimo + RSI UP", c1))
+    if abs(high_ago - h1) / h1 < 0.001 and c1 < o1 and r1 < r_prev and can_send(name, "L5"):
+        res.append(format_msg("SELL", name, "L5 DOPPIO MAX", "Doppio massimo + RSI DOWN", c1))
+    if e5_1 > e20_1 and e5_1_prev < e20_1_prev and r1 > 45 and can_send(name, "L6"):
+        res.append(format_msg("BUY", name, "L6 CROSS", "Incrocio medie UP", c1))
+    if e5_1 < e20_1 and e5_1_prev > e20_1_prev and r1 < 55 and can_send(name, "L6"):
+        res.append(format_msg("SELL", name, "L6 CROSS", "Incrocio medie DOWN", c1))
+    if abs(c1 - daily_low) / c1 < 0.001 and (pin_buy or eng_buy) and can_send(name, "L7"):
+        res.append(format_msg("BUY", name, "L7 SUPPORTO", f"Supporto giorno {daily_low:.5f}", c1))
+    if abs(c1 - daily_high) / c1 < 0.001 and (pin_sell or eng_sell) and can_send(name, "L7"):
+        res.append(format
