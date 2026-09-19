@@ -3,7 +3,7 @@ import yfinance as yf, pandas as pd, requests, time, os
 from flask import Flask
 from threading import Thread
 app = Flask(__name__)
-TOKEN=os.getenv("TELEGRAM_TOKEN"); CHAT=os.getenv("CHAT_ID")
+TOKEN=os.getenv("TELEGRAM_TOKEN"); CHAT=os.getenv("TELEGRAM_CHAT_ID")
 PAIRS={"EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","USDJPY=X":"USD/JPY","EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY","AUDUSD=X":"AUD/USD"}
 
 def send(m):
