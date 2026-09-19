@@ -1,84 +1,100 @@
-import os, requests, yfinance as yf
-import pandas as pd
+# BOT V22 FINALE - SEGUE REGOLE FOTO - H1+M5+M1 + SMA50 + RSI + BB
+import yfinance as yf, pandas as pd, pandas_ta as ta, requests, time, os
 from flask import Flask
-import threading, time
-from datetime import datetime
-
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-
-PAIRS = {
-"EURUSD=X": "EUR/USD",
-"GBPUSD=X": "GBP/USD", 
-"USDJPY=X": "USD/JPY",
-"EURJPY=X": "EUR/JPY",
-"GBPJPY=X": "GBP/JPY",
-"GC=F": "GOLD",
-"SI=F": "SILVER"
-}
-
+from threading import Thread
 app = Flask(__name__)
-last_status = 0
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+PAIRS = {"EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","USDJPY=X":"USD/JPY","EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY"}
 
 def send(msg):
+    try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":msg,"parse_mode":"Markdown"}, timeout=10)
+    except: pass
+
+def get_data(s,i,p):
     try:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=15)
-    except Exception as e:
-        print(e)
+        df=yf.download(s,period=p,interval=i,progress=False,auto_adjust=False)
+        if df.empty: return pd.DataFrame()
+        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+        return df
+    except: return pd.DataFrame()
 
-def rsi_calc(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+def pinbar(df):
+    if len(df)<5: return None
+    c=df.iloc[-1]; pr=df.iloc[-2]
+    body=abs(float(c['Close'])-float(c['Open'])); rng=float(c['High'])-float(c['Low'])
+    if rng==0: return None
+    up=float(c['High'])-max(float(c['Open']),float(c['Close'])); lo=min(float(c['Open']),float(c['Close']))-float(c['Low'])
+    if lo>body*2 and up<body*0.6: return "PINBAR_BUY"
+    if up>body*2 and lo<body*0.6: return "PINBAR_SELL"
+    if float(c['Close'])>float(c['Open']) and float(pr['Close'])<float(pr['Open']) and body>abs(float(pr['Close'])-float(pr['Open']))*1.2: return "ENGULFING_BUY"
+    if float(c['Close'])<float(c['Open']) and float(pr['Close'])>float(pr['Open']) and body>abs(float(pr['Close'])-float(pr['Open']))*1.2: return "ENGULFING_SELL"
+    return None
 
-def check_signal():
-    global last_status
-    now_hour = datetime.now().hour
-    if now_hour >= 23 or now_hour < 5:
-        return
+def check(s,name):
+    # REGOLA FOTO: Trend H1 con SMA50
+    df_h1=get_data(s,"60m","10d"); df_m5=get_data(s,"5m","5d"); df_m1=get_data(s,"1m","2d")
+    if len(df_h1)<60 or len(df_m5)<60 or len(df_m1)<30: return None
 
-    found = 0
-    for sym, name in PAIRS.items():
-        try:
-            df = yf.download(sym, period="5d", interval="15m", progress=False)
-            if len(df) < 60: continue
-            close = df['Close']
-            rsi = rsi_calc(close).iloc[-1]
-            ema20 = close.ewm(span=20).mean().iloc[-1]
-            ema50 = close.ewm(span=50).mean().iloc[-1]
-            price = float(close.iloc[-1])
-            ratio = abs(ema20 - ema50) / price * 1000
-            
-            if rsi < 38 and ema20 > ema50 and ratio > 0.20:
-                send(f"🔥 <b>{name} BUY</b>\nRatio {round(ratio,2)} RSI {round(rsi,1)}\nV15.6")
-                found += 1
-            elif rsi > 62 and ema20 < ema50 and ratio > 0.20:
-                send(f"🔥 <b>{name} SELL</b>\nRatio {round(ratio,2)} RSI {round(rsi,1)}\nV15.6")
-                found += 1
-        except: continue
-    
-    # se dopo 30 min zero segnali, ti avvisa che è vivo
-    if found == 0 and time.time() - last_status > 1800:
-        send(f"⏳ Bot vivo, mercato lento\nControllo... nessun segnale V.I.P. per ora\nV15.6 attiva - Pausa 23h-05h")
-        last_status = time.time()
+    # SMA50 per capire se prezzo sopra/sotto - come da tua foto
+    sma50_h1=float(ta.sma(df_h1['Close'],50).iloc[-1]); close_h1=float(df_h1['Close'].iloc[-1])
+    ema20_m5=float(ta.ema(df_m5['Close'],20).iloc[-1]); ema50_m5=float(ta.ema(df_m5['Close'],50).iloc[-1])
+    rsi_m1=float(ta.rsi(df_m1['Close'],14).iloc[-1]); rsi_m5=float(ta.rsi(df_m5['Close'],14).iloc[-1])
+
+    # Bollinger per rimbalzo bordo - come da foto
+    bb=ta.bbands(df_m1['Close'],20,2); lower=float(bb.iloc[-1,0]); upper=float(bb.iloc[-1,2]); close_m1=float(df_m1['Close'].iloc[-1])
+
+    # CAPISCE SE STA SCENDENDO DA 1H+ - COME TUA FOTO PRECEDENTE
+    ultime=df_h1['Close'].iloc[-8:].tolist()
+    down_count=sum(1 for i in range(1,8) if ultime[i]<ultime[i-1])
+    up_count=7-down_count
+    sta_scendendo_forte=down_count>=6
+    sta_salendo_forte=up_count>=6
+
+    trend_h1_up=close_h1 > sma50_h1
+    trend_m5_up=ema20_m5 > ema50_m5
+
+    # EVITA CONTRO-TREND DURANTE SPINTE FORTI - REGOLA FOTO
+    if trend_h1_up!= trend_m5_up: return None
+    if sta_scendendo_forte and trend_h1_up: return None
+    if sta_salendo_forte and not trend_h1_up: return None
+
+    pattern=pinbar(df_m1)
+    if pattern is None: return None
+
+    # CONFERMA CON RSI + BOLLINGER + ENGULFING - REGOLA FOTO
+    conferma_rsi = (rsi_m1<30 or rsi_m1>70 or abs(rsi_m1-50)>10)
+    conferma_bb = (close_m1 <= lower*1.001 or close_m1 >= upper*0.999)
+
+    if not (conferma_rsi or conferma_bb): return None
+
+    # SCADENZA COME DA FOTO: 5 MIN BASE SICURA, MAI SOTTO 3 MIN
+    if abs(rsi_m1-50)>25 and conferma_bb:
+        scadenza="3 MINUTI"
+    else:
+        scadenza="5 MINUTI" # più sicuro, 1 candela M5
+
+    if trend_h1_up and trend_m5_up and "BUY" in pattern and rsi_m1<55:
+        if sta_scendendo_forte: return None # non comprare se scende da 1h come tua foto
+        return f"🟢 BUY {name}\n📊 H1 SOPRA SMA50 + M5 UP | Trend lungo: {'UP' if sta_salendo_forte else 'ok'}\n📈 RSI M1:{rsi_m1:.0f} M5:{rsi_m5:.0f} BB:{'RIMBALZO' if conferma_bb else ''} Pattern:{pattern}\n👉 PO: 1 MIN | BUY | ⏱️ {scadenza}"
+
+    if not trend_h1_up and not trend_m5_up and "SELL" in pattern and rsi_m1>45:
+        if sta_salendo_forte: return None
+        return f"🔴 SELL {name}\n📊 H1 SOTTO SMA50 + M5 DOWN | Trend lungo: {'DOWN da 1h+ come foto' if sta_scendendo_forte else 'ok'} ({down_count}/7 rosse)\n📈 RSI M1:{rsi_m1:.0f} M5:{rsi_m5:.0f} BB:{'RIMBALZO' if conferma_bb else ''} Pattern:{pattern}\n👉 PO: 1 MIN | SELL | ⏱️ {scadenza}"
+    return None
 
 def loop():
-    time.sleep(5)
-    send("✅ <b>BOT V15.6 AVVIATO</b>\n- RSI 38/62 STRETTA\n- Ratio >0.20 (per stasera)\n- Pausa 23h-05h")
-    global last_status
-    last_status = time.time()
+    send("✅ V22 FINALE PARTITO - Legge trend 1h+ come tua foto | SMA50 + RSI + BB + Engulfing | Scadenza 5MIN sicura | Libero")
     while True:
-        check_signal()
-        time.sleep(180)
+        try:
+            for c,n in PAIRS.items():
+                s=check(c,n)
+                if s: send(s); time.sleep(20)
+            time.sleep(90)
+        except: time.sleep(60)
 
-threading.Thread(target=loop, daemon=True).start()
-
-@app.route("/")
-def home():
-    return "BOT V15.6 LIVE - Ratio 0.20"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0",  port=10000)
+@app.route('/')
+def home(): return "V22 attivo"
+Thread(target=loop,daemon=True).start()
+if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
