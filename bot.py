@@ -8,7 +8,7 @@ from datetime import datetime
 PAIR = "EUR/USD OTC"
 COOLDOWN = 300  # 5 minuti
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 ultimo_segale = 0
 
