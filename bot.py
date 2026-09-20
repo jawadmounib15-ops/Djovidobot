@@ -16,7 +16,7 @@ def get_price_fx(frm,to):
     try:
         r=requests.get(f"https://api.frankfurter.app/latest?from={frm}&to={to}",timeout=10).json()
         base=float(r["rates"][to])
-        noise = random.uniform(-0.0005, 0.0005) * base
+        noise = random.uniform(-0.0008, 0.0008) * base # allargato pochissimo
         return base + noise
     except: return None
 
@@ -34,7 +34,7 @@ def rsi(data):
     return 100-(100/(1+rs))
 
 def bot_loop():
-    tg("✅ V36.5 ULTRA STRETTO TF 5M LIVE - filtro laterale ON")
+    tg("✅ V36.6 SEMI-STRETTO TF 5M LIVE")
     while True:
         try:
             for name,frm,to in PAIRS:
@@ -49,17 +49,14 @@ def bot_loop():
                 ema9=sum(prezzi[-9:])/9
                 ema21=sum(prezzi[-21:])/21
                 rsi14=rsi(prezzi)
-                # FILTRO NUOVO 1: salta laterale
-                if 45 < rsi14 < 55: continue
-                # FILTRO NUOVO 2: EMA troppo vicine = finto segnale
-                if abs(ema9-ema21) / ema21 < 0.00015: continue
+                if 48 < rsi14 < 52: continue # prima 45-55, ora solo 48-52 stretto
+                if abs(ema9-ema21) / ema21 < 0.00008: continue # prima 0.00015, ora 0.00008
 
                 buy=0; sell=0
                 if ema9>ema21: buy+=1
                 else: sell+=1
-                if rsi14<35: buy+=1
-                elif rsi14>65: sell+=1
-                # FILTRO NUOVO 3: trend su 10 candele
+                if rsi14<38: buy+=1
+                elif rsi14>62: sell+=1
                 if prezzi[-1]>prezzi[-10]: buy+=1
                 else: sell+=1
 
@@ -74,7 +71,7 @@ def bot_loop():
             print(e); time.sleep(10)
 
 @app.route("/")
-def home(): return "V36.5 ULTRA LIVE"
+def home(): return "V36.6 SEMI-STRETTO LIVE"
 threading.Thread(target=bot_loop,daemon=True).start()
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
