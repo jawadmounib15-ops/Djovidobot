@@ -1,7 +1,8 @@
-import os
-import time
-import requests
+import os, time, requests, threading
+from flask import Flask
 from datetime import datetime
+
+app = Flask(__name__)
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -16,82 +17,74 @@ def tg(m):
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": CHAT_ID, "text": m}, timeout=10)
         print(m)
-    except Exception as e:
-        print(f"Errore: {e}")
+    except:
+        pass
 
 def get_price():
     try:
-        r = requests.get("https://api.frankfurter.app/latest?from=EUR&to=USD", timeout=10)
-        data = r.json()
-        return float(data["rates"]["USD"])
+        r = requests.get("https://api.frankfurter.app/latest?from=EUR&to=USD", timeout=10).json()
+        return float(r["rates"]["USD"])
     except:
         return None
 
 def rsi(data):
-    if len(data) < 15:
-        return 50
-    g = 0
-    l = 0
-    for i in range(-14, 0):
-        d = data[i] - data[i-1]
-        if d > 0:
-            g += d
-        else:
-            l += -d
-    if l == 0:
-        return 100
-    rs = (g / 14) / (l / 14)
-    return 100 - (100 / (1 + rs))
+    if len(data) < 15: return 50
+    g=0; l=0
+    for i in range(-14,0):
+        d=data[i]-data[i-1]
+        if d>0: g+=d
+        else: l+=-d
+    if l==0: return 100
+    rs=(g/14)/(l/14)
+    return 100-(100/(1+rs))
 
-def analizza():
+def bot_loop():
     global ultimo, prezzi
-    if time.time() - ultimo < COOLDOWN:
-        return
-    p = get_price()
-    if not p:
-        return
-    prezzi.append(p)
-    if len(prezzi) > 50:
-        prezzi.pop(0)
-    if len(prezzi) < 20:
-        print(f"Raccolgo {len(prezzi)}/20 prezzo {p}")
-        return
-    ema9 = sum(prezzi[-9:]) / 9
-    ema21 = sum(prezzi[-21:]) / 21
-    rsi14 = rsi(prezzi)
-    buy = 0
-    sell = 0
-    mot = []
-    if ema9 > ema21:
-        buy += 1
-        mot.append("EMA BUY")
-    else:
-        sell += 1
-        mot.append("EMA SELL")
-    if rsi14 < 35:
-        buy += 1
-        mot.append(f"RSI {rsi14:.0f} BUY")
-    elif rsi14 > 65:
-        sell += 1
-        mot.append(f"RSI {rsi14:.0f} SELL")
-    if prezzi[-1] > prezzi[-5]:
-        buy += 1
-        mot.append("Trend UP")
-    else:
-        sell += 1
-        mot.append("Trend DOWN")
-    if buy >= 2:
-        tg(f"BUY {PAIR} {datetime.now().strftime('%H:%M:%S')} {' | '.join(mot)}")
-        ultimo = time.time()
-    elif sell >= 2:
-        tg(f"SELL {PAIR} {datetime.now().strftime('%H:%M:%S')} {' | '.join(mot)}")
-        ultimo = time.time()
-    else:
-        print(f"Neutro B{buy} S{sell}")
+    tg("✅ V36.1 LIVE FIX RENDER - AVVIATO")
+    print("BOT LOOP AVVIATO")
+    while True:
+        try:
+            if time.time() - ultimo < COOLDOWN:
+                time.sleep(5)
+                continue
+            p = get_price()
+            if not p:
+                time.sleep(10)
+                continue
+            prezzi.append(p)
+            if len(prezzi) > 50: prezzi.pop(0)
+            if len(prezzi) < 20:
+                print(f"Raccolgo {len(prezzi)}/20 {p}")
+                time.sleep(30)
+                continue
+            ema9 = sum(prezzi[-9:])/9
+            ema21 = sum(prezzi[-21:])/21
+            rsi14 = rsi(prezzi)
+            buy=0; sell=0
+            if ema9 > ema21: buy+=1
+            else: sell+=1
+            if rsi14 < 35: buy+=1
+            elif rsi14 > 65: sell+=1
+            if prezzi[-1] > prezzi[-5]: buy+=1
+            else: sell+=1
+            if buy >= 2:
+                tg(f"🟢 {PAIR} BUY {datetime.now().strftime('%H:%M:%S')} EMA9 {ema9:.5f} RSI {rsi14:.0f}")
+                ultimo=time.time()
+            elif sell >= 2:
+                tg(f"🔴 {PAIR} SELL {datetime.now().strftime('%H:%M:%S')} EMA9 {ema9:.5f} RSI {rsi14:.0f}")
+                ultimo=time.time()
+            time.sleep(30)
+        except Exception as e:
+            print(e)
+            time.sleep(10)
 
-tg("V36 LIVE SENZA QUOTEX - AVVIATO")
-print("V36 AVVIATO CORRETTO")
+@app.route("/")
+def home():
+    return "V36.1 LIVE - BOT RUNNING"
 
-while True:
-    analizza()
-    time.sleep(30)
+# Avvia bot in background
+threading.Thread(target=bot_loop, daemon=True).start()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
