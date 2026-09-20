@@ -48,7 +48,7 @@ def make_msg(tipo,coppia,lavoro,motivo,prezzo):
 
 def can_send(coppia,lavoro,is_otc):
     key=coppia+"_"+lavoro; now=time.time()
-    cd = 1800 if is_otc else 1800
+    cd = 600 if is_otc else 1800
     if key in LAST and now-LAST[key]<cd: return False
     LAST[key]=now; return True
 
@@ -69,7 +69,7 @@ def check(sym,name,base_price,is_otc):
     r1=float(rsi_calc(df_m1["Close"]).iloc[-1]); r_prev=float(rsi_calc(df_m1["Close"]).iloc[-2])
     e5_15=float(ema(df_m15["Close"],5).iloc[-1]); e20_15=float(ema(df_m15["Close"],20).iloc[-1])
     body=abs(c1_raw-o1); lo=min(o1,c1_raw)-l1; up=h1-max(o1,c1_raw)
-    pin_buy=lo>body*1.2; pin_sell=up>body*1.2
+    pin_buy=lo>body*0.8; pin_sell=up>body*0.8
     eng_buy=c1_raw>o1 and c_prev<o_prev; eng_sell=c1_raw<o1 and c_prev>o_prev
     res=[]
     if not is_otc:
@@ -82,7 +82,6 @@ def check(sym,name,base_price,is_otc):
         if r_prev>65 and r1<65 and can_send(name,"L2",False):
             res.append(make_msg("SELL",name,"L2 RIMBALZO","RSI 65",c1))
     else:
-        # MEDIUM: basta 1 conferma, non 2!
         if e5_15>e20_15 and (pin_buy or eng_buy) and r1>35 and r1<70 and can_send(name,"L1-OTC",True):
             res.append(make_msg("BUY",name,"L1-MEDIUM OTC","EMA UP + Pinbar/Engulfing + RSI ok",c1))
         if e5_15<e20_15 and (pin_sell or eng_sell) and r1<65 and r1>30 and can_send(name,"L1-OTC",True):
@@ -95,7 +94,7 @@ def check(sym,name,base_price,is_otc):
     return res
 
 def loop():
-    send("V37.2 MEDIUM LIVE - OTC medio, non troppo stretto")
+    send("V37.2 PICCOLO FIX LIVE - solo pinbar 0.8 e pausa 10min")
     while True:
         try:
             now=datetime.now()
@@ -112,7 +111,7 @@ def loop():
             print(e); time.sleep(60)
 
 @app.route("/")
-def home(): return "V37.2 MEDIUM LIVE OK"
+def home(): return "V37.2 PICCOLO FIX LIVE OK"
 Thread(target=loop, daemon=True).start()
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
