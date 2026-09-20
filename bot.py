@@ -7,7 +7,7 @@ app = Flask(__name__)
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 PAIR = "EUR/USD OTC"
-COOLDOWN = 300
+COOLDOWN = 300 # 5 min = TF 5M
 
 ultimo = 0
 prezzi = []
@@ -40,8 +40,8 @@ def rsi(data):
 
 def bot_loop():
     global ultimo, prezzi
-    tg("✅ V36.1 LIVE FIX RENDER - AVVIATO")
-    print("BOT LOOP AVVIATO")
+    tg("✅ V36.2 TF 5M LIVE - AVVIATO")
+    print("BOT LOOP AVVIATO TF 5M")
     while True:
         try:
             if time.time() - ultimo < COOLDOWN:
@@ -68,10 +68,10 @@ def bot_loop():
             if prezzi[-1] > prezzi[-5]: buy+=1
             else: sell+=1
             if buy >= 2:
-                tg(f"🟢 {PAIR} BUY {datetime.now().strftime('%H:%M:%S')} EMA9 {ema9:.5f} RSI {rsi14:.0f}")
+                tg(f"🟢 {PAIR} BUY TF 5M {datetime.now().strftime('%H:%M:%S')} | Scadenza 5 min | EMA {ema9:.5f} RSI {rsi14:.0f}")
                 ultimo=time.time()
             elif sell >= 2:
-                tg(f"🔴 {PAIR} SELL {datetime.now().strftime('%H:%M:%S')} EMA9 {ema9:.5f} RSI {rsi14:.0f}")
+                tg(f"🔴 {PAIR} SELL TF 5M {datetime.now().strftime('%H:%M:%S')} | Scadenza 5 min | EMA {ema9:.5f} RSI {rsi14:.0f}")
                 ultimo=time.time()
             time.sleep(30)
         except Exception as e:
@@ -80,9 +80,8 @@ def bot_loop():
 
 @app.route("/")
 def home():
-    return "V36.1 LIVE - BOT RUNNING"
+    return "V36.2 TF 5M LIVE - BOT RUNNING"
 
-# Avvia bot in background
 threading.Thread(target=bot_loop, daemon=True).start()
 
 if __name__ == "__main__":
