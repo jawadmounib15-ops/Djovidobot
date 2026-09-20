@@ -31,8 +31,8 @@ def tg(m):
             data={"chat_id": CHAT_ID, "text": m},
             timeout=10
         )
-    except Exception as e:
-        print(f"Errore telegram: {e}")
+    except:
+        pass
 
 def get_price_fx(frm, to):
     try:
@@ -40,8 +40,7 @@ def get_price_fx(frm, to):
         base = float(r["rates"][to])
         noise = random.uniform(-0.0008, 0.0008) * base
         return base + noise
-    except Exception as e:
-        print(f"Errore prezzo {frm}/{to}: {e}")
+    except:
         return None
 
 def rsi(data):
@@ -65,7 +64,7 @@ def rsi(data):
     return 100 - (100 / (1 + rs))
 
 def bot_loop():
-    tg("✅ V36.7 SEMI-STRETTO LIVE - Filtro 45-55 | EMA 0.00010")
+    tg("✅ V36.8 CORRETTO LIVE - BUY solo RSI <55 | SELL solo RSI >45")
     while True:
         try:
             for name, frm, to in PAIRS:
@@ -80,7 +79,6 @@ def bot_loop():
                 s["prezzi"].append(p)
                 if len(s["prezzi"]) > 60:
                     s["prezzi"].pop(0)
-
                 if len(s["prezzi"]) < 25:
                     continue
 
@@ -89,54 +87,54 @@ def bot_loop():
                 ema21 = sum(prezzi[-21:]) / 21
                 rsi14 = rsi(prezzi)
 
-                # --- FILTRO V36.7 ---
+                # FILTRO STRETTO
                 if 45 < rsi14 < 55:
                     continue
                 if abs(ema9 - ema21) / ema21 < 0.00010:
                     continue
 
+                # LOGICA CORRETTA - MAI BUY CON RSI ALTO
                 buy = 0
                 sell = 0
 
-                if ema9 > ema21:
+                # EMA + RSI devono essere coerenti
+                if ema9 > ema21 and rsi14 < 50:
                     buy += 1
-                else:
+                if ema9 < ema21 and rsi14 > 50:
                     sell += 1
 
+                # RSI estremo
                 if rsi14 < 42:
                     buy += 1
-                elif rsi14 > 58:
+                if rsi14 > 58:
                     sell += 1
 
-                if prezzi[-1] > prezzi[-10]:
+                # Trend prezzo + RSI coerente
+                if prezzi[-1] > prezzi[-10] and rsi14 < 55:
                     buy += 1
-                else:
+                if prezzi[-1] < prezzi[-10] and rsi14 > 45:
                     sell += 1
 
                 ora = datetime.now().strftime('%H:%M:%S')
 
-                if buy >= 2:
+                # SICUREZZA FINALE: mai BUY con RSI >55, mai SELL con RSI <45
+                if buy >= 2 and rsi14 <= 55:
                     tg(f"🟢 {name} BUY TF 5M {ora} | Scadenza 5 min | RSI {rsi14:.0f}")
                     s["ultimo"] = time.time()
-                elif sell >= 2:
+                elif sell >= 2 and rsi14 >= 45:
                     tg(f"🔴 {name} SELL TF 5M {ora} | Scadenza 5 min | RSI {rsi14:.0f}")
                     s["ultimo"] = time.time()
 
             time.sleep(35)
         except Exception as e:
-            print(f"Errore loop: {e}")
+            print(e)
             time.sleep(10)
 
 @app.route("/")
 def home():
-    return "V36.7 SEMI-STRETTO LIVE - OK"
-
-@app.route("/status")
-def status():
-    return str(store)
+    return "V36.8 CORRETTO LIVE"
 
 threading.Thread(target=bot_loop, daemon=True).start()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port) 
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
