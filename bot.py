@@ -111,7 +111,7 @@ def scan():
             # TRIGGER LONG 80%: trend4h LONG + prezzo sopra EMA200 + Stoch <20 + RSI che risale da 30-50 + tocco e20
             if trend4h == "LONG" and price > float(last['e200']):
                 tocco_e20 = abs(price - float(last['e20'])) / price < 0.0015
-                rsi_trigger = 30 <= rsi_val <= 50 and rsi_val > float(prev['rsi'])
+                rsi_trigger = 25 <= rsi_val <= 55 and rsi_val > float(prev['rsi'])
                 stoch_trigger = stoch_k < 25 and float(last['stoch_d']) < 30
 
                 if tocco_e20 and rsi_trigger and stoch_trigger:
