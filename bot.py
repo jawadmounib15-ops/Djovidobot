@@ -1,103 +1,91 @@
-import os
-import time
-import requests
-import ccxt
+import os, time, requests, yfinance as yf
 import pandas as pd
-from datetime import datetime, timedelta
-from flask import Flask
-from threading import Thread
+from datetime import datetime
 
-# === FIX PORTA RENDER - NON TOCCARE ===
-app = Flask(__name__)
-@app.route('/')
-def home():
-    return "V64 LARGO LIVE - BOT ATTIVO"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-Thread(target=run_web, daemon=True).start()
-# ======================================
-
-# === INCOLLA I TUOI DATI VERI QUI ===
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-# ====================================
 
-PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "EUR/GBP"]
-WIN, LOSS, ultimo_id, trades = 0, 0, 0, []
+PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X"]
+WIN = 0
+LOSS = 0
+last_check = 0
 
-exchange = ccxt.binance()
-
-def send(text, buttons=None):
+def send(msg, reply_markup=None):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        data = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-        if buttons:
-            data["reply_markup"] = {"inline_keyboard": buttons}
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
+        if reply_markup:
+            data["reply_markup"] = reply_markup
         requests.post(url, json=data, timeout=10)
     except Exception as e:
         print(f"Errore send: {e}")
 
-def nuovo_segnale(pair, direz):
-    scadenza = datetime.now() + timedelta(minutes=16)
-    trades.append({"pair": pair, "dir": direz, "scad": scadenza})
-    send(f"🔔 *V64 LARGO {direz} {pair}*\n🕐 Aperto: {datetime.now().strftime('%H:%M')} -> Check: {scadenza.strftime('%H:%M')}\nEMA20 + RSI OK ✅")
-    print(f"SEGNALE LARGO {direz} {pair}")
+# MESSAGGIO AVVIO - così sai che è partito
+send("🚀 *V65 ULTRA LARGO ATTIVO*\nScansione ogni 60sec\nRegole LARGHISSIME\nIn attesa segnali...")
 
-def start():
-    global WIN, LOSS, ultimo_id
-    print("🚀 V64 LARGO ATTIVO")
-    send("🚀 *V64 LARGO ATTIVO*\nCerco segnali ogni 60 sec - LARGO VERO")
-    
-    last_check = 0
-    while True:
+print("Bot V65 avviato...")
+
+while True:
+    try:
+        # Check bottoni WIN/LOSS
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+            r = requests.get(url, timeout=10).json()
+            if r.get("result"):
+                for upd in r["result"][-5:]:
+                    if "callback_query" in upd:
+                        cq = upd["callback_query"]
+                        data = cq["data"]
+                        if "|" in data:
+                            _, pair, d = data.split("|")
+                            if "WIN" in data:
+                                WIN += 1
+                            else:
+                                LOSS += 1
+                            tot = WIN+LOSS
+                            wr = (WIN/tot*100) if tot>0 else 0
+                            send(f"✅ *{data.split('|')[0]}* {pair} {d}\n📊 STATS: WIN {WIN} | LOSS {LOSS}\nWinrate: {wr:.1f}%")
+                            # cancella update
+                            requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={upd['update_id']+1}", timeout=5)
+        except:
+            pass
+
+        # SCANSIONE OGNI 60 SEC
         if time.time() - last_check > 60:
+            last_check = time.time()
+            print(f"[{datetime.now()}] Scansione...")
             for pair in PAIRS:
                 try:
-                    symbol = pair.replace("/", "")
-                    bars = exchange.fetch_ohlcv(symbol, "5m", limit=50)
-                    df = pd.DataFrame(bars, columns=["t","o","h","l","c","v"])
-                    
-                    df["ema20"] = df["c"].ewm(span=20).mean()
-                    delta = df["c"].diff()
+                    df = yf.download(pair, period="1d", interval="5m", progress=False)
+                    if len(df) < 25: continue
+                    if isinstance(df.columns, pd.MultiIndex):
+                        df.columns = df.columns.get_level_values(0)
+                    df["ema20"] = df["Close"].ewm(span=20).mean()
+                    # RSI semplice
+                    delta = df["Close"].diff()
                     gain = (delta.where(delta>0,0)).rolling(14).mean()
                     loss = (-delta.where(delta<0,0)).rolling(14).mean()
-                    df["rsi"] = 100 - (100/(1+gain/loss))
-                    
+                    rs = gain / loss
+                    df["rsi"] = 100 - (100/(1+rs))
                     last = df.iloc[-1]
-                    prev = df.iloc[-2]
-                    
-                    # LARGO VERO - NON STRETTO
-                    if last["c"] > last["ema20"] and last["rsi"] > 50 and prev["c"] < prev["ema20"]:
-                        nuovo_segnale(pair, "BUY")
-                    
-                    if last["c"] < last["ema20"] and last["rsi"] < 50 and prev["c"] > prev["ema20"]:
-                        nuovo_segnale(pair, "SELL")
-                        
+
+                    signal = None
+                    # REGOLE ULTRA LARGHE - senza incrocio, solo posizione!
+                    if last["Close"] > last["ema20"] and last["rsi"] > 50:
+                        signal = "BUY"
+                    elif last["Close"] < last["ema20"] and last["rsi"] < 50:
+                        signal = "SELL"
+
+                    if signal:
+                        clean_pair = pair.replace("=X","")
+                        msg = f"🔔 *V65 ULTRA LARGO {signal} {clean_pair}*\nPrice: {last['Close']:.5f}\nEMA20: {last['ema20']:.5f}\nRSI: {last['rsi']:.1f}"
+                        kb = {"inline_keyboard": [[{"text":"✅ WIN","callback_data":f"WIN|{clean_pair}|{signal}"},{"text":"❌ LOSS","callback_data":f"LOSS|{clean_pair}|{signal}"}]]}
+                        send(msg, kb)
+                        print(f"SEGNALE {signal} {clean_pair}")
                 except Exception as e:
                     print(f"Errore {pair}: {e}")
-            last_check = time.time()
 
-        for t in trades[:]:
-            if datetime.now() >= t["scad"]:
-                btns = [[{"text": "✅ WIN", "callback_data": f"WIN|{t['pair']}|{t['dir']}"}, {"text": "❌ LOSS", "callback_data": f"LOSS|{t['pair']}|{t['dir']}"}]]
-                send(f"⏰ *Scaduto {t['dir']} {t['pair']}* - Com'è andata?", btns)
-                trades.remove(t)
+    except Exception as e:
+        print(f"Errore loop: {e}")
 
-        try:
-            r = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={ultimo_id+1}", timeout=10).json()
-            for u in r.get("result", []):
-                ultimo_id = u["update_id"]
-                if "callback_query" in u:
-                    esito, pair, direz = u["callback_query"]["data"].split("|")
-                    if esito == "WIN": WIN += 1
-                    else: LOSS += 1
-                    wr = WIN/(WIN+LOSS)*100 if (WIN+LOSS)>0 else 0
-                    send(f"{'✅' if esito=='WIN' else '❌'} *{esito} {direz} {pair}*\n\n📊 STATS: WIN {WIN} | LOSS {LOSS}\nWinrate: {wr:.1f}%")
-        except: pass
-        
-        time.sleep(3)
-
-start()
+    time.sleep(3)
