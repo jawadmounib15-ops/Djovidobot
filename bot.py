@@ -5,165 +5,116 @@ from datetime import datetime, timedelta
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-VERSION = "V36.6 FINALE 15m 5min FIX AUD"
+VERSION = "V38 FINALE REALE BLOCCO DISCESA"
 SYMBOLS = ["EURUSD=X", "GBPUSD=X", "EURGBP=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "EURJPY=X", "GBPJPY=X"]
 
 app = Flask(__name__)
-
 @app.route("/")
-def home():
-    return f"{VERSION} LIVE"
+def home(): return f"{VERSION} LIVE"
+def send_tg(m):
+    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": m, "parse_mode": "Markdown"}, timeout=10)
+    except: pass
 
-def send_tg(msg):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-    except:
-        pass
-
-def calc_rsi(close, p=14):
-    delta = close.diff()
-    gain = delta.where(delta > 0, 0).rolling(p).mean()
-    loss = -delta.where(delta < 0, 0).rolling(p).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+def calc_rsi(c, p=14):
+    d = c.diff()
+    g = d.where(d>0,0).rolling(p).mean()
+    l = -d.where(d<0,0).rolling(p).mean()
+    rs = g/l
+    return 100-(100/(1+rs))
 
 last_sent = {}
 
 def get_data(sym):
     try:
         df = yf.download(sym, period="5d", interval="15m", progress=False, auto_adjust=True)
-        if len(df) < 80:
-            return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+        if len(df)<100: return None
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         c = pd.to_numeric(df['Close'], errors='coerce').dropna()
-        h = df['High']
-        l = df['Low']
-        o = df['Open']
-        ema20 = c.ewm(span=20).mean()
-        ema50 = c.ewm(span=50).mean()
+        h, l, o = df['High'], df['Low'], df['Open']
+        ema20 = c.ewm(span=20).mean(); ema50 = c.ewm(span=50).mean()
         sma50 = c.rolling(50).mean()
         rsi = calc_rsi(c)
-        bb_mid = c.rolling(20).mean()
-        bb_std = c.rolling(20).std()
-        bb_u = bb_mid + 2 * bb_std
-        bb_l = bb_mid - 2 * bb_std
-        price = float(c.iloc[-1])
-        r = float(rsi.iloc[-1])
-        e20 = float(ema20.iloc[-1])
-        e50 = float(ema50.iloc[-1])
-        bu = float(bb_u.iloc[-1])
-        bl = float(bb_l.iloc[-1])
-        s50 = float(sma50.iloc[-1])
-        prev_c = float(c.iloc[-2])
-        prev_e20 = float(ema20.iloc[-2])
-        prev_e50 = float(ema50.iloc[-2])
-        max20 = float(h.rolling(20).max().iloc[-2])
-        min20 = float(l.rolling(20).min().iloc[-2])
-        bb_width = (bu - bl) / float(bb_mid.iloc[-1])
+        bb_m = c.rolling(20).mean(); bb_s = c.rolling(20).std()
+        bb_u = bb_m+2*bb_s; bb_l = bb_m-2*bb_s
 
-        lavoro = None
-        side = None
+        price=float(c.iloc[-1]); prev=float(c.iloc[-2]); prev2=float(c.iloc[-3])
+        e20=float(ema20.iloc[-1]); e50=float(ema50.iloc[-1])
+        pe20=float(ema20.iloc[-2]); pe50=float(ema50.iloc[-2])
+        s50=float(sma50.iloc[-1]); s50_5=float(sma50.iloc[-6])
+        r=float(rsi.iloc[-1])
+        bu=float(bb_u.iloc[-1]); bl=float(bb_l.iloc[-1])
+        bb_w=(bu-bl)/float(bb_m.iloc[-1])
+        curr_o=float(o.iloc[-1]); prev_o=float(o.iloc[-2])
+        is_green = price > curr_o
+        is_red = price < curr_o
+        body = abs(price-curr_o)
+        sma_up = s50 > s50_5 + 0.0001
+        sma_down = s50 < s50_5 - 0.0001
+        # FILTRO CROLLO: se ultime 2 chiusure in discesa, niente BUY
+        trend_down = prev < prev2 and price < prev
+        trend_up = prev > prev2 and price > prev
 
-        # L1 TREND STRETTO 52-55 / 45-48
-        if e20 > e50 and r >= 52 and r <= 55 and price > e20 and price > prev_c and price > s50:
-            side = "BUY"
-            lavoro = "L1 TREND STRETTO"
-        elif e20 < e50 and r >= 45 and r <= 48 and price < e20 and price < prev_c and price < s50:
-            side = "SELL"
-            lavoro = "L1 TREND STRETTO"
+        lavoro=side=None
 
-        # L2 RIMBALZO 32/68
+        # L1 SOLO TREND FORTE
+        if not lavoro and e20>e50 and sma_up and is_green and trend_up and price>s50 and price>e20 and prev<price:
+            if r>=52 and r<=54:
+                side="BUY"; lavoro="L1 TREND FORTE"
+        elif not lavoro and e20<e50 and sma_down and is_red and trend_down and price<s50 and price<e20 and prev>price:
+            if r>=46 and r<=48:
+                side="SELL"; lavoro="L1 TREND FORTE"
+
+        # L2 RIMBALZO SOLO ESTREMO
         if not lavoro:
-            if c.iloc[-1] <= bl and r <= 32:
-                side = "BUY"
-                lavoro = "L2 RIMBALZO 32/68"
-            elif c.iloc[-1] >= bu and r >= 68:
-                side = "SELL"
-                lavoro = "L2 RIMBALZO 32/68"
+            if float(c.iloc[-1]) <= bl and r<=32 and is_green:
+                side="BUY"; lavoro="L2 RIMBALZO"
+            elif float(c.iloc[-1]) >= bu and r>=68 and is_red:
+                side="SELL"; lavoro="L2 RIMBALZO"
 
-        # L3 BREAKOUT REGOLATO
+        # L3 BREAKOUT CON TREND
         if not lavoro:
-            if price > max20 and r >= 55 and r <= 62 and e20 > e50 and price > s50:
-                side = "BUY"
-                lavoro = "L3 BREAKOUT REGOLATO"
-            elif price < min20 and r >= 38 and r <= 45 and e20 < e50 and price < s50:
-                side = "SELL"
-                lavoro = "L3 BREAKOUT REGOLATO"
+            max20=float(h.rolling(20).max().iloc[-2])
+            min20=float(l.rolling(20).min().iloc[-2])
+            if price>max20 and is_green and sma_up and r>=54 and r<=58:
+                side="BUY"; lavoro="L3 BREAKOUT"
+            elif price<min20 and is_red and sma_down and r>=42 and r<=46:
+                side="SELL"; lavoro="L3 BREAKOUT"
 
-        # L4 PULLBACK
+        # L7 SQUEEZE STRETTISSIMO
         if not lavoro:
-            if price > s50 and prev_c < s50 and e20 > e50 and r > 48 and r < 55:
-                side = "BUY"
-                lavoro = "L4 PULLBACK"
-            elif price < s50 and prev_c > s50 and e20 < e50 and r > 45 and r < 52:
-                side = "SELL"
-                lavoro = "L4 PULLBACK"
+            if bb_w<0.0018 and e20>e50 and sma_up and is_green and r>=52 and r<=53.5 and price>e20:
+                side="BUY"; lavoro="L7 SQUEEZE"
+            elif bb_w<0.0018 and e20<e50 and sma_down and is_red and r>=46.5 and r<=48 and price<e20:
+                side="SELL"; lavoro="L7 SQUEEZE"
 
-        # L5 EMA CROSS
-        if not lavoro:
-            if prev_e20 < prev_e50 and e20 > e50 and r > 50 and r < 60:
-                side = "BUY"
-                lavoro = "L5 EMA CROSS"
-            elif prev_e20 > prev_e50 and e20 < e50 and r > 40 and r < 50:
-                side = "SELL"
-                lavoro = "L5 EMA CROSS"
-
-        # L6 REVERSAL
-        if not lavoro:
-            body = abs(float(c.iloc[-1]) - float(o.iloc[-1]))
-            lower_wick = float(min(c.iloc[-1], o.iloc[-1]) - l.iloc[-1])
-            upper_wick = float(h.iloc[-1] - max(c.iloc[-1], o.iloc[-1]))
-            if lower_wick > body * 1.5 and r >= 35 and r <= 45:
-                side = "BUY"
-                lavoro = "L6 REVERSAL"
-            elif upper_wick > body * 1.5 and r >= 55 and r <= 65:
-                side = "SELL"
-                lavoro = "L6 REVERSAL"
-
-        # L7 SQUEEZE - FIX PIU' STRETTO
-        if not lavoro:
-            if bb_width < 0.0025 and r >= 52 and r <= 54 and price > e20 and e20 > e50:
-                side = "BUY"
-                lavoro = "L7 SQUEEZE"
-            elif bb_width < 0.0025 and r >= 46 and r <= 48 and price < e20 and e20 < e50:
-                side = "SELL"
-                lavoro = "L7 SQUEEZE"
-
+        # BLOCCO TOTALE PER COPPIA 25 MIN
         if side:
-            key = f"{sym}_{side}_{lavoro}"
-            now = datetime.now()
-            block_min = 15 if "L7" in lavoro else 5
+            now=datetime.now()
             if sym in last_sent:
-                same_key = last_sent[sym]['key'] == key
-                time_diff = now - last_sent[sym]['time']
-                same_price = abs(last_sent[sym].get('price', 0) - price) < 0.00005
-                if same_key and (time_diff < timedelta(minutes=block_min) or same_price):
-                    return {"skip": True}
-            last_sent[sym] = {'key': key, 'time': now, 'price': price}
-            return {"price": price, "rsi": r, "side": side, "lavoro": lavoro}
+                diff=now-last_sent[sym]['time']
+                same_price=abs(last_sent[sym].get('price',0)-price)<0.0001
+                if diff < timedelta(minutes=25) or same_price:
+                    return {"skip":True}
+            last_sent[sym]={'time':now,'price':price,'key':lavoro}
+            return {"price":price,"rsi":r,"side":side,"lavoro":lavoro}
         return None
-    except:
-        return None
+    except: return None
 
 def bot_loop():
     time.sleep(3)
-    send_tg(f"✅ *{VERSION} LIVE*\nTimeframe: 15m\nAnalisi: ogni 5 min\nTra segnali: 10 sec\nAnti-doppio: 5 min (15 min L7)\nFix duplicato prezzo")
+    send_tg(f"✅ *{VERSION} LIVE*\nBlocco discesa attivo - 25min per coppia - 15m")
     while True:
         for sym in SYMBOLS:
-            d = get_data(sym)
-            if not d or d.get("skip"):
-                continue
+            d=get_data(sym)
+            if not d or d.get("skip"): continue
             if d.get("side"):
-                nome = sym.replace("=X", "")
-                emoji = "🟢" if d['side'] == 'BUY' else "🔻"
-                msg = f"{emoji} *{d['side']} {nome} - {d['lavoro']}*\nRSI: {d['rsi']:.1f} | 15m\nPrezzo: {d['price']:.5f}"
-                send_tg(msg)
+                nome=sym.replace("=X","")
+                emoji="🟢" if d['side']=="BUY" else "🔻"
+                send_tg(f"{emoji} *{d['side']} {nome} - {d['lavoro']}*\nRSI: {d['rsi']:.1f} | 15m\nPrezzo: {d['price']:.5f}")
             time.sleep(10)
         time.sleep(300)
 
 Thread(target=bot_loop, daemon=True).start()
-
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+if __name__=="__main__":
+    port=int(os.getenv("PORT",10000))
+    app.run(host="0.0.0.0",port=port)
