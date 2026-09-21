@@ -1,5 +1,2 @@
-yfinance
-pandas
-ta
-Flask
 requests
+python-dotenv
