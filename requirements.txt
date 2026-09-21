@@ -1,5 +1,4 @@
-requests
-flask
+Flask
 yfinance
 pandas
-numpy
+requests
