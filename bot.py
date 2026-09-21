@@ -137,5 +137,6 @@ def run():
 
 Thread(target=run, daemon=True).start()
 Thread(target=check_results, daemon=True).start()
+tg("🚀 V60.1 Medio 7 lavori L4 SICURO avviato ✅ - L4 con regola sicura attiva")
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
