@@ -5,116 +5,122 @@ from datetime import datetime, timedelta
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-VERSION = "V38 FINALE REALE BLOCCO DISCESA"
+VERSION = "V39 5/7 RAGIONATO ANTI-CIMA"
 SYMBOLS = ["EURUSD=X", "GBPUSD=X", "EURGBP=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "EURJPY=X", "GBPJPY=X"]
 
 app = Flask(__name__)
 @app.route("/")
-def home(): return f"{VERSION} LIVE"
+def home(): return f"{VERSION} LIVE - {datetime.now().strftime('%H:%M')}"
+
 def send_tg(m):
-    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": m, "parse_mode": "Markdown"}, timeout=10)
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        data={"chat_id": CHAT_ID, "text": m, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
 def calc_rsi(c, p=14):
     d = c.diff()
     g = d.where(d>0,0).rolling(p).mean()
     l = -d.where(d<0,0).rolling(p).mean()
-    rs = g/l
-    return 100-(100/(1+rs))
+    rs = g / l
+    return 100 - (100 / (1 + rs))
 
 last_sent = {}
 
-def get_data(sym):
+def get_signal(sym):
     try:
         df = yf.download(sym, period="5d", interval="15m", progress=False, auto_adjust=True)
-        if len(df)<100: return None
+        if len(df) < 100: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+
         c = pd.to_numeric(df['Close'], errors='coerce').dropna()
-        h, l, o = df['High'], df['Low'], df['Open']
-        ema20 = c.ewm(span=20).mean(); ema50 = c.ewm(span=50).mean()
-        sma50 = c.rolling(50).mean()
+        o = pd.to_numeric(df['Open'], errors='coerce').dropna()
+
+        ema9 = c.ewm(span=9).mean()
+        ema20 = c.ewm(span=20).mean()
+        ema50 = c.ewm(span=50).mean()
         rsi = calc_rsi(c)
-        bb_m = c.rolling(20).mean(); bb_s = c.rolling(20).std()
-        bb_u = bb_m+2*bb_s; bb_l = bb_m-2*bb_s
 
-        price=float(c.iloc[-1]); prev=float(c.iloc[-2]); prev2=float(c.iloc[-3])
-        e20=float(ema20.iloc[-1]); e50=float(ema50.iloc[-1])
-        pe20=float(ema20.iloc[-2]); pe50=float(ema50.iloc[-2])
-        s50=float(sma50.iloc[-1]); s50_5=float(sma50.iloc[-6])
-        r=float(rsi.iloc[-1])
-        bu=float(bb_u.iloc[-1]); bl=float(bb_l.iloc[-1])
-        bb_w=(bu-bl)/float(bb_m.iloc[-1])
-        curr_o=float(o.iloc[-1]); prev_o=float(o.iloc[-2])
+        macd = c.ewm(span=12).mean() - c.ewm(span=26).mean()
+        sig = macd.ewm(span=9).mean()
+        hist = macd - sig
+
+        price = float(c.iloc[-1])
+        curr_o = float(o.iloc[-1])
+        prev = float(c.iloc[-2]); prev_o = float(o.iloc[-2])
+        prev2 = float(c.iloc[-3]); prev2_o = float(o.iloc[-3])
+
+        e9 = float(ema9.iloc[-1]); e20 = float(ema20.iloc[-1]); e50 = float(ema50.iloc[-1])
+        r = float(rsi.iloc[-1])
+        h_now = float(hist.iloc[-1]); h_prev = float(hist.iloc[-2])
+
+        # ANTI-DOPPIO 25 MIN
+        now = datetime.now()
+        if sym in last_sent and now - last_sent[sym]['time'] < timedelta(minutes=25):
+            return None
+
+        # CALCOLO VERDI/ROSSE
+        green_count = sum([1 if price>curr_o else 0, 1 if prev>prev_o else 0, 1 if prev2>prev2_o else 0])
+        red_count = 3 - green_count
+        dist = abs(price - e20) / e20 * 100
         is_green = price > curr_o
-        is_red = price < curr_o
-        body = abs(price-curr_o)
-        sma_up = s50 > s50_5 + 0.0001
-        sma_down = s50 < s50_5 - 0.0001
-        # FILTRO CROLLO: se ultime 2 chiusure in discesa, niente BUY
-        trend_down = prev < prev2 and price < prev
-        trend_up = prev > prev2 and price > prev
 
-        lavoro=side=None
+        # --- BUY SCORE ---
+        score_buy = 0; motivi_buy = []
+        if e9 > e20 > e50:
+            score_buy += 2; motivi_buy.append("EMA OK")
+        if dist < 0.18:
+            score_buy += 2; motivi_buy.append(f"vicino {dist:.2f}%")
+        else:
+            motivi_buy.append(f"LONTANO {dist:.2f}%")
+        if 52 <= r <= 62:
+            score_buy += 1; motivi_buy.append(f"RSI {r:.0f}")
+        if h_now > 0 and h_now > h_prev:
+            score_buy += 1; motivi_buy.append("MACD+")
+        if green_count <= 2:
+            score_buy += 1; motivi_buy.append("non cima")
+        else:
+            motivi_buy.append(f"{green_count} verdi")
 
-        # L1 SOLO TREND FORTE
-        if not lavoro and e20>e50 and sma_up and is_green and trend_up and price>s50 and price>e20 and prev<price:
-            if r>=52 and r<=54:
-                side="BUY"; lavoro="L1 TREND FORTE"
-        elif not lavoro and e20<e50 and sma_down and is_red and trend_down and price<s50 and price<e20 and prev>price:
-            if r>=46 and r<=48:
-                side="SELL"; lavoro="L1 TREND FORTE"
+        # --- SELL SCORE ---
+        score_sell = 0
+        if e9 < e20 < e50: score_sell += 2
+        if dist < 0.18: score_sell += 2
+        if 38 <= r <= 48: score_sell += 1
+        if h_now < 0 and h_now < h_prev: score_sell += 1
+        if red_count <= 2: score_sell += 1
 
-        # L2 RIMBALZO SOLO ESTREMO
-        if not lavoro:
-            if float(c.iloc[-1]) <= bl and r<=32 and is_green:
-                side="BUY"; lavoro="L2 RIMBALZO"
-            elif float(c.iloc[-1]) >= bu and r>=68 and is_red:
-                side="SELL"; lavoro="L2 RIMBALZO"
+        # DECISIONE - SERVONO 5/7
+        if score_buy >= 5 and is_green and price > e20:
+            last_sent[sym] = {'time': now, 'price': price}
+            return {"side": "BUY", "price": price, "rsi": r, "score": score_buy, "mot": ", ".join(motivi_buy)}
 
-        # L3 BREAKOUT CON TREND
-        if not lavoro:
-            max20=float(h.rolling(20).max().iloc[-2])
-            min20=float(l.rolling(20).min().iloc[-2])
-            if price>max20 and is_green and sma_up and r>=54 and r<=58:
-                side="BUY"; lavoro="L3 BREAKOUT"
-            elif price<min20 and is_red and sma_down and r>=42 and r<=46:
-                side="SELL"; lavoro="L3 BREAKOUT"
+        if score_sell >= 5 and not is_green and price < e20:
+            last_sent[sym] = {'time': now, 'price': price}
+            return {"side": "SELL", "price": price, "rsi": r, "score": score_sell, "mot": "trend down"}
 
-        # L7 SQUEEZE STRETTISSIMO
-        if not lavoro:
-            if bb_w<0.0018 and e20>e50 and sma_up and is_green and r>=52 and r<=53.5 and price>e20:
-                side="BUY"; lavoro="L7 SQUEEZE"
-            elif bb_w<0.0018 and e20<e50 and sma_down and is_red and r>=46.5 and r<=48 and price<e20:
-                side="SELL"; lavoro="L7 SQUEEZE"
-
-        # BLOCCO TOTALE PER COPPIA 25 MIN
-        if side:
-            now=datetime.now()
-            if sym in last_sent:
-                diff=now-last_sent[sym]['time']
-                same_price=abs(last_sent[sym].get('price',0)-price)<0.0001
-                if diff < timedelta(minutes=25) or same_price:
-                    return {"skip":True}
-            last_sent[sym]={'time':now,'price':price,'key':lavoro}
-            return {"price":price,"rsi":r,"side":side,"lavoro":lavoro}
+        # DEBUG: se era 4/7 come il tuo 157.292 perso, non manda ma puoi vedere nei log
         return None
-    except: return None
+
+    except Exception as e:
+        print(f"Err {sym}: {e}")
+        return None
 
 def bot_loop():
-    time.sleep(3)
-    send_tg(f"✅ *{VERSION} LIVE*\nBlocco discesa attivo - 25min per coppia - 15m")
+    time.sleep(5)
+    send_tg(f"✅ *{VERSION} LIVE*\nRegola 5/7 | anti-cima | blocco 25min")
     while True:
         for sym in SYMBOLS:
-            d=get_data(sym)
-            if not d or d.get("skip"): continue
-            if d.get("side"):
-                nome=sym.replace("=X","")
-                emoji="🟢" if d['side']=="BUY" else "🔻"
-                send_tg(f"{emoji} *{d['side']} {nome} - {d['lavoro']}*\nRSI: {d['rsi']:.1f} | 15m\nPrezzo: {d['price']:.5f}")
+            d = get_signal(sym)
+            if d:
+                nome = sym.replace("=X","")
+                emoji = "🟢" if d['side']=="BUY" else "🔻"
+                send_tg(f"{emoji} *{d['side']} {nome} - {d['score']}/7*\n{d['mot']}\nRSI {d['rsi']:.0f} | {d['price']:.5f} | 15m")
             time.sleep(10)
-        time.sleep(300)
+        time.sleep(240)
 
 Thread(target=bot_loop, daemon=True).start()
-if __name__=="__main__":
-    port=int(os.getenv("PORT",10000))
-    app.run(host="0.0.0.0",port=port)
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
