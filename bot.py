@@ -166,7 +166,7 @@ def check_results():
         except: pass
 
 def loop():
-    send("🚀 V61 TRIPLA CONFERMA 80% avviato ✅\nFiltri: 4H Trend + ATR + RSI/Stoch\nSegnali: pochi ma sicuri (2-5 al giorno)")
+    send("🚀 V61 TRIPLA CONFERMA 80% avviato ✅\nFiltri: 4H Trend + ATR + RSI/Stoch\nSegnali: pochi ma sicuri (20-30 al giorno)")
     while True:
         try:
             scan()
