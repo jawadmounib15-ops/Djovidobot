@@ -21,8 +21,8 @@ Thread(target=run_web, daemon=True).start()
 # ======================================
 
 # === INCOLLA I TUOI DATI VERI QUI ===
-TELEGRAM_TOKEN = ("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = ("TELEGRAM_CHAT_ID")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 # ====================================
 
 PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "EUR/GBP"]
