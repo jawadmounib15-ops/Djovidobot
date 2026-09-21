@@ -145,16 +145,15 @@ def get_sig(sym):
         if price<l20 and rv<42:
             m=f"L3 BREAKOUT SELL {pair}"
             tg(m); add(sym,price,m,"L3"); last[sym]=datetime.now(); return
+# L4 PULLBACK SICURO
+e20_prev = float(e20.iloc[-2])
+trend_up_forte = e20v > e50v and e20v > e20_prev
+trend_down_forte = e20v < e50v and e20v < e20_prev
 
-        # L4 PULLBACK
-        dist=abs(price-s50v)/s50v*100
-        if price>e50v and dist<0.15 and e9v>e20v and 50<=rv<=62:
-            m=f"L4 PULLBACK BUY {pair}"
-            tg(m); add(sym,price,m,"L4"); last[sym]=datetime.now(); return
-        if price<e50v and dist<0.15 and e9v<e20v and 38<=rv<=50:
-            m=f"L4 PULLBACK SELL {pair}"
-            tg(m); add(sym,price,m,"L4"); last[sym]=datetime.now(); return
-
+if trend_up_forte and e20v*0.998 < price < e20v*1.002 and 50 < rv < 60:
+    add(f"L4 PULLBACK BUY {sym} RSI {rv:.0f}")
+elif trend_down_forte and e20v*0.998 < price < e20v*1.002 and 40 < rv < 50:
+    add(f"L4 PULLBACK SELL {sym} RSI {rv:.0f}")
         # L5 DOPPIO
         diff=abs(pr-pr2)/pr*100
         if diff<0.07 and price>pr and rv>50:
