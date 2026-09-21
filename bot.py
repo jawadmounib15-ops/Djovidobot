@@ -93,8 +93,8 @@ def scan():
             clean = symbol.replace("=X","")
 
             # FILTRO 1: VOLATILITA' (Google: ATR)
-            if last['atr'] < last['atr_ma50'] * 0.8: continue # mercato piatto, salta
-            if last['atr'] > last['atr_ma50'] * 2.5: continue # news spike, salta
+            if last['atr'] < last['atr_ma50'] * 0.5: continue # mercato piatto, salta
+            if last['atr'] > last['atr_ma50'] * 3.0: continue # news spike, salta
 
             # FILTRO 2: TREND 4H (Tripla conferma)
             trend4h = get_trend_4h(symbol)
