@@ -1,113 +1,80 @@
-import os, time, threading
+import yfinance as yf, pandas as pd, ta, time, threading, os, requests
 from flask import Flask
-import yfinance as yf
-import pandas as pd
-import requests
-
-TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
-PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "EURJPY=X", "GBPJPY=X", "EURGBP=X", "USDCHF=X", "NZDUSD=X", "EURCHF=X", "AUDJPY=X", "GBPCHF=X", "EURCAD=X", "AUDCAD=X", "NZDJPY=X"]
 
 app = Flask(__name__)
-@app.route('/')
-def home():
-    return "V61 FIXED LIVE"
-
-pending=[]
+TOKEN = os.getenv("TELEGRAM_TOKEN", "8033997039:AAF2h2A22P8X0CR1Z__F3rM5oJ9g8QwY8aE0")
+CHAT_ID = os.getenv("CHAT_ID", "TUO_CHAT_ID")
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","USDCHF=X","NZDUSD=X","EURCHF=X","AUDJPY=X","GBPCHF=X","EURCAD=X","AUDCAD=X","NZDJPY=X"]
 
 def send(msg):
-    try:
-        requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id": CHAT_ID, "text": msg}, timeout=10)
     except: pass
 
 def fix_df(df):
-    # FIX BUG yfinance nuovo che ritorna MultiIndex
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    return df
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    df = df.copy()
+    for c in ['Open','High','Low','Close']:
+        if c in df.columns: df[c] = pd.to_numeric(df[c], errors='coerce')
+    return df.dropna()
 
-def rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.where(delta>0, 0).rolling(period).mean()
-    loss = -delta.where(delta<0, 0).rolling(period).mean()
-    rs = gain / loss
-    return 100 - (100/(1+rs))
+pending = []
 
-def atr(df, period=14):
-    hl = df['High'] - df['Low']
-    hc = abs(df['High'] - df['Close'].shift())
-    lc = abs(df['Low'] - df['Close'].shift())
-    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-    return tr.rolling(period).mean()
+def check_signal(symbol):
+    try:
+        df = fix_df(yf.download(symbol, period="5d", interval="15m", progress=False))
+        if len(df) < 250: return None
+        close, high, low = df['Close'], df['High'], df['Low']
+        ema20 = ta.trend.ema_indicator(close, 20).iloc[-1]
+        ema200 = ta.trend.ema_indicator(close, 200).iloc[-1]
+        rsi = ta.momentum.rsi(close, 14).iloc[-1]
+        stoch = ta.momentum.stoch(close, high, low, 14, 3).iloc[-1]
+        atr = ta.volatility.average_true_range(high, low, close, 14)
+        price = float(close.iloc[-1])
+        touch = abs(price - float(ema20)) / price * 100
+        a_ma = float(atr.rolling(50).mean().iloc[-1])
+        a = float(atr.iloc[-1])
 
-def stochastic(df, k=14, d=3):
-    low_min = df['Low'].rolling(k).min()
-    high_max = df['High'].rolling(k).max()
-    k_percent = 100 * ((df['Close'] - low_min) / (high_max - low_min))
-    return k_percent, k_percent.rolling(d).mean()
+        if price > ema200: side = "BUY"
+        elif price < ema200: side = "SELL"
+        else: return None
 
-def scan():
-    for symbol in PAIRS:
-        try:
-            df = yf.download(symbol, period="5d", interval="15m", progress=False)
-            df = fix_df(df)
-            if len(df) < 210: continue
-            df['e20'] = df['Close'].ewm(span=20).mean()
-            df['e200'] = df['Close'].ewm(span=200).mean()
-            df['rsi'] = rsi(df['Close'])
-            df['atr'] = atr(df, 14)
-            df['atr_ma50'] = df['atr'].rolling(50).mean()
-            df['stoch_k'], _ = stochastic(df)
-            
-            last = df.iloc[-1]
-            clean = symbol.replace("=X","")
-            price = float(last['Close'])
-            rsi_val = float(last['rsi'])
-            stoch_k = float(last['stoch_k'])
+        if touch > 0.35: return None
+        if side == "BUY" and not (20 < rsi < 60 and stoch < 35): return None
+        if side == "SELL" and not (40 < rsi < 80 and stoch > 65): return None
+        if not (0.4 * a_ma < a < 3.5 * a_ma): return None
 
-            # FILTRO LOOSE per vedere segnali subito
-            if last['atr'] < last['atr_ma50'] * 0.4: continue
-            if last['atr'] > last['atr_ma50'] * 3.5: continue
+        # FILTRO 4H - STEP 2
+        df4 = fix_df(yf.download(symbol, period="1mo", interval="4h", progress=False))
+        if len(df4) < 100: return None
+        p4 = float(df4['Close'].iloc[-1])
+        e200_4h = float(ta.trend.ema_indicator(df4['Close'], 200).iloc[-1])
+        if side == "BUY" and p4 < e200_4h: return None
+        if side == "SELL" and p4 > e200_4h: return None
 
-            tocco_e20 = abs(price - float(last['e20'])) / price < 0.005
-            signal = None
-            if price > float(last['e200']) and tocco_e20 and 20 <= rsi_val <= 60 and stoch_k < 35:
-                signal = "BUY"
-            if price < float(last['e200']) and tocco_e20 and 40 <= rsi_val <= 80 and stoch_k > 65:
-                signal = "SELL"
+        return {"symbol": symbol, "side": side, "price": price, "rsi": float(rsi), "touch": touch, "time": time.time()}
+    except: return None
 
-            if signal:
-                if any(p['symbol']==clean for p in pending): continue
-                send(f"🎯 L4 LOOSE {signal} {clean} RSI {rsi_val:.1f} Entry {price:.5f}")
-                pending.append({"symbol": clean, "signal": signal, "entry": price, "time": time.time()})
-        except Exception as e:
-            print(f"err {symbol} {e}")
-            continue
-
-def check_results():
-    now = time.time()
-    for p in pending[:]:
-        if now - p['time'] < 900: continue
-        try:
-            df = yf.download(p['symbol']+"=X", period="1d", interval="1m", progress=False)
-            df = fix_df(df)
-            if len(df)==0: continue
-            curr = float(df['Close'].iloc[-1])
-            win = (p['signal']=="BUY" and curr > p['entry']) or (p['signal']=="SELL" and curr < p['entry'])
-            send(f"{'WIN ✅' if win else 'LOSS ❌'} L4 {p['signal']} {p['symbol']}")
-            pending.remove(p)
-        except: pass
-
-def loop():
-    send(f"🚀 V61 FIX BUG APPLICATO - Ora deve mandare!\nTOKEN {TOKEN[:10]}...")
+def scan_loop():
+    send("✅ V62 STEP 2 LIVE - Tocco 0.35% + 4H")
     while True:
-        try:
-            scan()
-            check_results()
-        except: pass
+        for sym in PAIRS:
+            sig = check_signal(sym)
+            if sig:
+                if any(p['symbol']==sig['symbol'] and time.time()-p['time']<1800 for p in pending): continue
+                pending.append(sig)
+                send(f"🎯 L4 V62 {sig['side']} {sym.replace('=X','')} | RSI {sig['rsi']:.1f} Tocco {sig['touch']:.2f}% Entry {sig['price']:.5f}")
+                time.sleep(2)
         time.sleep(60)
 
-threading.Thread(target=loop, daemon=True).start()
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+def check_results():
+    while True:
+        time.sleep(60)
+        now = time.time()
+        for p in pending[:]:
+            if now - p['time'] < 900: continue
+            try:
+                df = fix_df(yf.download(p['symbol'], period="1d", interval="5m", progress=False))
+                if len(df)==0: continue
+                curr = float(df['Close'].iloc[-1])
+                win = (p['side']=="BUY" and curr > p['price']) or (p['side']=="SELL" and curr < p['price'])
+                send(f"{'WIN ✅' if win else 'LOSS ❌'} L
