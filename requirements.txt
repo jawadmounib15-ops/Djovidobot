@@ -1,5 +1,3 @@
-requests
-ccxt
+yfinance
 pandas
-numpy
-flask
+requests
