@@ -1,4 +1,5 @@
-yfinance
-ta
-pandas
 requests
+python-telegram-bot
+pandas
+numpy
+flask
