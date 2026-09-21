@@ -1,10 +1,28 @@
-import time, requests, ccxt
+import os
+import time
+import requests
+import ccxt
 import pandas as pd
 from datetime import datetime, timedelta
+from flask import Flask
+from threading import Thread
+
+# === FIX PORTA RENDER - NON TOCCARE ===
+app = Flask(__name__)
+@app.route('/')
+def home():
+    return "V64 LARGO LIVE - BOT ATTIVO"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
+
+Thread(target=run_web, daemon=True).start()
+# ======================================
 
 # === INCOLLA I TUOI DATI VERI QUI ===
-TELEGRAM_TOKEN = "8833997039:AAHBJ-sBRy2wIaMjiXv1Szk3azvj8aOSc7Y"
-TELEGRAM_CHAT_ID = "6723819958"
+TELEGRAM_TOKEN = ("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = ("TELEGRAM_CHAT_ID")
 # ====================================
 
 PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "EUR/GBP"]
@@ -31,11 +49,10 @@ def nuovo_segnale(pair, direz):
 def start():
     global WIN, LOSS, ultimo_id
     print("🚀 V64 LARGO ATTIVO")
-    send("🚀 *V64 LARGO ATTIVO*\nCerco segnali ogni 60 sec...")
+    send("🚀 *V64 LARGO ATTIVO*\nCerco segnali ogni 60 sec - LARGO VERO")
     
     last_check = 0
     while True:
-        # CERCA SEGNALI OGNI 60 SEC
         if time.time() - last_check > 60:
             for pair in PAIRS:
                 try:
@@ -43,7 +60,6 @@ def start():
                     bars = exchange.fetch_ohlcv(symbol, "5m", limit=50)
                     df = pd.DataFrame(bars, columns=["t","o","h","l","c","v"])
                     
-                    # CALCOLO LARGO SEMPLICE
                     df["ema20"] = df["c"].ewm(span=20).mean()
                     delta = df["c"].diff()
                     gain = (delta.where(delta>0,0)).rolling(14).mean()
@@ -64,14 +80,12 @@ def start():
                     print(f"Errore {pair}: {e}")
             last_check = time.time()
 
-        # CHECK SCADENZE WIN/LOSS
         for t in trades[:]:
             if datetime.now() >= t["scad"]:
                 btns = [[{"text": "✅ WIN", "callback_data": f"WIN|{t['pair']}|{t['dir']}"}, {"text": "❌ LOSS", "callback_data": f"LOSS|{t['pair']}|{t['dir']}"}]]
                 send(f"⏰ *Scaduto {t['dir']} {t['pair']}* - Com'è andata?", btns)
                 trades.remove(t)
 
-        # LEGGI WIN/LOSS DA TELEGRAM
         try:
             r = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={ultimo_id+1}", timeout=10).json()
             for u in r.get("result", []):
