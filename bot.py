@@ -120,7 +120,7 @@ def scan():
 
             # TRIGGER SHORT 80%
             if trend4h == "SHORT" and price < float(last['e200']):
-                tocco_e20 = abs(price - float(last['e20'])) / price < 0.0015
+                tocco_e20 = abs(price - float(last['e20'])) / price < 0.0030
                 rsi_trigger = 50 <= rsi_val <= 70 and rsi_val < float(prev['rsi'])
                 stoch_trigger = stoch_k > 75 and float(last['stoch_d']) > 70
 
