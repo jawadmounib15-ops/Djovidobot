@@ -1,5 +1,5 @@
 requests
-python-telegram-bot
+flask
+yfinance
 pandas
 numpy
-flask
