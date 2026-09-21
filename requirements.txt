@@ -1,4 +1,5 @@
-Flask
 yfinance
 pandas
+ta
+Flask
 requests
