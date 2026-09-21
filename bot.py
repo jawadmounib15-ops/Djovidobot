@@ -18,8 +18,8 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # --- IL TUO BOT SNIPER ---
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-CHAT_ID = os.environ.get("CHAT_ID")
+BOT_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def send_telegram(msg):
     try:
