@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-TELEGRAM_TOKEN = "TELEGRAM_TOKEN"
-TELEGRAM_CHAT_ID = "TELEGRAM_CHAT_ID"
+TELEGRAM_TOKEN = "8833997039:AAHBJ-sBRy2wIaMjiXv1Szk3azvj8aOSc7Y"
+TELEGRAM_CHAT_ID = "6723819958"
 
 PAIRS = ["GBP/USD", "EUR/USD", "USD/JPY"]
 WIN, LOSS, ultimo_id, trades = 0,0,0,[]
