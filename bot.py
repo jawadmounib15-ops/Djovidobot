@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-VERSION = "V36.5 FINALE 15m 5min"
+VERSION = "V36.6 FINALE 15m 5min FIX AUD"
 SYMBOLS = ["EURUSD=X", "GBPUSD=X", "EURGBP=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "EURJPY=X", "GBPJPY=X"]
 
 app = Flask(__name__)
@@ -60,11 +60,12 @@ def get_data(sym):
         prev_e50 = float(ema50.iloc[-2])
         max20 = float(h.rolling(20).max().iloc[-2])
         min20 = float(l.rolling(20).min().iloc[-2])
-        bb_width = (bu - bl) / bb_mid.iloc[-1]
+        bb_width = (bu - bl) / float(bb_mid.iloc[-1])
 
         lavoro = None
         side = None
 
+        # L1 TREND STRETTO 52-55 / 45-48
         if e20 > e50 and r >= 52 and r <= 55 and price > e20 and price > prev_c and price > s50:
             side = "BUY"
             lavoro = "L1 TREND STRETTO"
@@ -72,6 +73,7 @@ def get_data(sym):
             side = "SELL"
             lavoro = "L1 TREND STRETTO"
 
+        # L2 RIMBALZO 32/68
         if not lavoro:
             if c.iloc[-1] <= bl and r <= 32:
                 side = "BUY"
@@ -80,6 +82,7 @@ def get_data(sym):
                 side = "SELL"
                 lavoro = "L2 RIMBALZO 32/68"
 
+        # L3 BREAKOUT REGOLATO
         if not lavoro:
             if price > max20 and r >= 55 and r <= 62 and e20 > e50 and price > s50:
                 side = "BUY"
@@ -88,6 +91,7 @@ def get_data(sym):
                 side = "SELL"
                 lavoro = "L3 BREAKOUT REGOLATO"
 
+        # L4 PULLBACK
         if not lavoro:
             if price > s50 and prev_c < s50 and e20 > e50 and r > 48 and r < 55:
                 side = "BUY"
@@ -96,6 +100,7 @@ def get_data(sym):
                 side = "SELL"
                 lavoro = "L4 PULLBACK"
 
+        # L5 EMA CROSS
         if not lavoro:
             if prev_e20 < prev_e50 and e20 > e50 and r > 50 and r < 60:
                 side = "BUY"
@@ -104,6 +109,7 @@ def get_data(sym):
                 side = "SELL"
                 lavoro = "L5 EMA CROSS"
 
+        # L6 REVERSAL
         if not lavoro:
             body = abs(float(c.iloc[-1]) - float(o.iloc[-1]))
             lower_wick = float(min(c.iloc[-1], o.iloc[-1]) - l.iloc[-1])
@@ -115,20 +121,26 @@ def get_data(sym):
                 side = "SELL"
                 lavoro = "L6 REVERSAL"
 
+        # L7 SQUEEZE - FIX PIU' STRETTO
         if not lavoro:
-            if bb_width < 0.004 and r >= 50 and r <= 56 and price > e20 and e20 > e50:
+            if bb_width < 0.0025 and r >= 52 and r <= 54 and price > e20 and e20 > e50:
                 side = "BUY"
                 lavoro = "L7 SQUEEZE"
-            elif bb_width < 0.004 and r >= 44 and r <= 50 and price < e20 and e20 < e50:
+            elif bb_width < 0.0025 and r >= 46 and r <= 48 and price < e20 and e20 < e50:
                 side = "SELL"
                 lavoro = "L7 SQUEEZE"
 
         if side:
             key = f"{sym}_{side}_{lavoro}"
             now = datetime.now()
-            if sym in last_sent and last_sent[sym]['key'] == key and now - last_sent[sym]['time'] < timedelta(minutes=5):
-                return {"skip": True}
-            last_sent[sym] = {'key': key, 'time': now}
+            block_min = 15 if "L7" in lavoro else 5
+            if sym in last_sent:
+                same_key = last_sent[sym]['key'] == key
+                time_diff = now - last_sent[sym]['time']
+                same_price = abs(last_sent[sym].get('price', 0) - price) < 0.00005
+                if same_key and (time_diff < timedelta(minutes=block_min) or same_price):
+                    return {"skip": True}
+            last_sent[sym] = {'key': key, 'time': now, 'price': price}
             return {"price": price, "rsi": r, "side": side, "lavoro": lavoro}
         return None
     except:
@@ -136,7 +148,7 @@ def get_data(sym):
 
 def bot_loop():
     time.sleep(3)
-    send_tg(f"✅ *{VERSION} LIVE*\nTimeframe: 15m\nAnalisi: ogni 5 min\nTra segnali: 10 sec\nAnti-doppio: 5 min\n7 Lavori attivi")
+    send_tg(f"✅ *{VERSION} LIVE*\nTimeframe: 15m\nAnalisi: ogni 5 min\nTra segnali: 10 sec\nAnti-doppio: 5 min (15 min L7)\nFix duplicato prezzo")
     while True:
         for sym in SYMBOLS:
             d = get_data(sym)
