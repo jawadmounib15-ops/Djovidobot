@@ -66,8 +66,8 @@ while True:
                     df["rsi"]=100-(100/(1+gain/loss))
                     last=df.iloc[-1]
                     sig=None
-                    if last["Close"]>last["ema20"] and last["rsi"]>50: sig="BUY"
-                    elif last["Close"]<last["ema20"] and last["rsi"]<50: sig="SELL"
+                    if last["Close"]>last["ema20"] and last["rsi"]>40: sig="BUY"
+                    elif last["Close"]<last["ema20"] and last["rsi"]<60: sig="SELL"
                     if sig:
                         pending[pair]=(sig,float(last["Close"]),now)
                         send(f"🔔 *ULTRA {sig} {pair.replace('=X','')}*\nPrice {last['Close']:.5f} EMA {last['ema20']:.5f} RSI {last['rsi']:.1f}\n⏳ AUTO tra 15min")
