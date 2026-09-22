@@ -3,7 +3,7 @@ from datetime import datetime,timedelta
 from flask import Flask
 app=Flask(__name__)
 @app.route('/')
-def home():return "V74 99% LOSS"
+def home():return "V76 100% LOSS"
 def rf():
  app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
 threading.Thread(target=rf,daemon=True).start()
@@ -14,7 +14,7 @@ WIN=0;LOSS=0;PEND={};CHECK=0
 def send(m):
  try:requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
  except:pass
-send("💀 *V74 99% LOSS ATTIVO* Entra al top")
+send("💀 *V76 100% LOSS TARDI*")
 
 while True:
  try:
@@ -42,25 +42,22 @@ while True:
      if len(df)<500:continue
      if isinstance(df.columns,pd.MultiIndex):df.columns=df.columns.get_level_values(0)
      e500=df["Close"].ewm(span=500).mean().iloc[-1]
-     cl=df["Close"].iloc[-1]
-     # TREND ULTIME 5 CANDELE
+     cl=float(df["Close"].iloc[-1])
      last5=df["Close"].iloc[-5:].tolist()
-     trend_up=last5[-1]>last5[0]
-     trend_down=last5[-1]<last5[0]
+     trend_up=last5[-1]>last5[0]+(last5[0]*0.0005)
+     trend_down=last5[-1]<last5[0]-(last5[0]*0.0005)
 
-     # ENTRA SOLO CONTRO TREND FORTE = PERDE SICURO
-     if cl>e500 and trend_up:
-      sig="SELL" # se sta salendo forte, vendi = perdi
-     elif cl<e500 and trend_down:
-      sig="BUY" # se sta scendendo forte, compra = perdi
-     else:
-      sig="SELL" if cl>e500 else "BUY"
+     # 100% LOSS: ENTRA TARDI NEL TREND = PERDE SUL PULLBACK
+     if trend_up and cl>e500:
+      sig="BUY" # compra al TOP = poi scende = LOSS
+     elif trend_down and cl<e500:
+      sig="SELL" # vende al BOTTOM = poi sale = LOSS
+     else: continue
 
-     # AGGIUNGI FILTRO: ENTRA SOLO SE DISTANZA DA EMA > 0.5%
      dist=abs(cl-e500)/e500*100
-     if dist<0.3: continue # salta se vicino, entra solo lontano = top/bottom
+     if dist<0.4: continue # entra solo molto lontano = esausto
 
-     PEND[pair]=(sig,float(cl),now)
+     PEND[pair]=(sig,cl,now)
      send(f"💀 *5M {sig} {pair.replace('=X','')}* DIST {dist:.2f}% TREND {'UP' if trend_up else 'DOWN'}")
     except:pass
  except:pass
