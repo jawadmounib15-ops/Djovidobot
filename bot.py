@@ -40,8 +40,8 @@ while True:
      del PEND[k]
     except:pass
 
-  # SEGNALE OGNI 60 SEC CON COOLDOWN 5 MIN
-  if time.time()-CHECK>60:
+  # SEGNALE OGNI 120 SEC CON COOLDOWN 5 MIN
+  if time.time(120)-CHECK>:
    CHECK=time.time()
    for pair in PAIRS:
     if pair in LAST and now-LAST[pair]<timedelta(minutes=5):continue
