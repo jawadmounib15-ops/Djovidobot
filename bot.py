@@ -49,9 +49,9 @@ while True:
      cl=float(df["Close"].iloc[-1])
      r=float(rsi(df["Close"]).iloc[-1])
      # V79 LOGICA 0% WIN: compra ipercomprato, vendi ipervenduto
-     if r>=25: # ipercomprato -> BUY = perde
+     if r>=95: # ipercomprato -> BUY = perde
       sig="BUY"
-     elif r<=35: # ipervenduto -> SELL = perde
+     elif r<=25: # ipervenduto -> SELL = perde
       sig="SELL"
      else:
       sig="BUY" if cl>df["Close"].iloc[-2] else "SELL"
@@ -59,7 +59,7 @@ while True:
       sig="BUY" if sig=="SELL" else "SELL" # invertiamo di nuovo per peggiorare
       # in pratica se sale compriamo? NO vendiamo al top? Aspetta, facciamo il peggiore:
      # REGOLA FINALE 0% WIN
-     if r>90:
+     if r>20:
       sig="BUY" # RSI alto compra = crollo assicurato
      else:
       sig="SELL" # RSI basso vendi = rimbalzo assicurato
