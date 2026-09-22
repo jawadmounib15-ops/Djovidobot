@@ -3,7 +3,7 @@ from datetime import datetime,timedelta
 from flask import Flask
 app=Flask(__name__)
 @app.route('/')
-def home():return "V74 EMA500 LOSS"
+def home():return "V74 EMA800 LOSS"
 def rf():
  app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
 threading.Thread(target=rf,daemon=True).start()
@@ -41,14 +41,14 @@ while True:
    for pair in PAIRS:
     if pair in LAST and now-LAST[pair]<timedelta(minutes=5):continue
     try:
-     df=yf.download(pair,period="10d",interval="5m",progress=False)
-     if len(df)<500:continue
+     df=yf.download(pair,period="1d",interval="5m",progress=False)
+     if len(df)<800:continue
      if isinstance(df.columns,pd.MultiIndex):df.columns=df.columns.get_level_values(0)
-     e500=df["Close"].ewm(span=500).mean().iloc[-1]
+     e500=df["Close"].ewm(span=800).mean().iloc[-1]
      cl=float(df["Close"].iloc[-1])
-     sig="SELL" if cl>e500 else "BUY"
+     sig="SELL" if cl>e800 else "BUY"
      PEND[pair]=(sig,cl,now);LAST[pair]=now
-     send(f"🔔 *5M {sig} {pair.replace('=X','')}*\nEMA500 {e500:.5f} P {cl:.5f}\n(LOSS MODE)")
+     send(f"🔔 *5M {sig} {pair.replace('=X','')}*\nEMA800 {e800:.5f} P {cl:.5f}\n(LOSS MODE)")
     except:pass
  except:pass
  time.sleep(3)
