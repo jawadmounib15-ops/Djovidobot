@@ -49,9 +49,9 @@ while True:
      cl=float(df["Close"].iloc[-1])
      r=float(rsi(df["Close"]).iloc[-1])
      # V79 LOGICA 0% WIN: compra ipercomprato, vendi ipervenduto
-     if r>=65: # ipercomprato -> BUY = perde
+     if r>=25: # ipercomprato -> BUY = perde
       sig="BUY"
-     elif r<=35: # ipervenduto -> SELL = perde
+     elif r<=75: # ipervenduto -> SELL = perde
       sig="SELL"
      else:
       sig="BUY" if cl>df["Close"].iloc[-2] else "SELL"
