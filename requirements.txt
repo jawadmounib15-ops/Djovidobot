@@ -1,4 +1,6 @@
+Flask
 yfinance
 pandas
 requests
-flask
+numpy
+lxml
