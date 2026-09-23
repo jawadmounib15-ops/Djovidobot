@@ -80,4 +80,8 @@ def bot():
                     except: pass
         except: pass
         time.sleep(1)
-threading.Thread
+threading.Thread(target=bot_loop,daemon=True).start()
+
+if __name__=="__main__":
+    port=int(os.environ.get("PORT",10000))
+    app.run(host="0.0.0.0",port=port)
