@@ -49,7 +49,7 @@ def bot():
                         del PEND[k]
                     except: pass
 
-            if time.time()-CHECK >= 60:
+            if time.time()-CHECK >= 30:
                 CHECK=time.time()
                 for pair in PAIRS:
                     if pair in PEND: continue
@@ -68,8 +68,8 @@ def bot():
                         ema=float(df["EMA200"].iloc[-1])
                         sig=None
                         toll=(up-low)*0.05
-                        if r>=70 and c>=up-toll and c<ema: sig="BUY"
-                        elif r<=30 and c<=low+toll and c>ema: sig="SELL"
+                        if r>=65 and c>=up-toll and c<ema: sig="BUY"
+                        elif r<=35 and c<=low+toll and c>ema: sig="SELL"
                         if sig:
                             PEND[pair]=(sig,c,now)
                             send(f"💀 *5M {sig} {pair.replace('=X','')} 3 FILTRI RSI:{r:.0f}*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*")
