@@ -1,6 +1,3 @@
-Ahsan code b 3 lfiltrat  w 3aks ila gal bue dir sell w ila gal sell dir buy
-.......................
-
 import os, time, requests, yfinance as yf, threading, pandas as pd
 from datetime import datetime, timedelta
 from flask import Flask
