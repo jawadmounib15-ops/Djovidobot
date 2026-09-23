@@ -8,7 +8,7 @@ def home():
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","NZDUSD=X","EURCHF=X","CADJPY=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","EURCHF=X","CADJPY=X"]
 
 IDX=0
 
@@ -48,8 +48,8 @@ def bot():
                     ema=float(df["EMA200"].iloc[-1])
                     toll=(up-low)*0.05
                     sig=None
-                    if r>=28 and c>=up-toll and c>ema: sig="BUY"
-                    elif r<=70 and c<=low+toll and c<ema: sig="SELL"
+                    if r>=25 and c>=up-toll and c>ema: sig="BUY"
+                    elif r<=72 and c<=low+toll and c<ema: sig="SELL"
                     if sig:
                         send(f"💀 *{pair.replace('=X','')} {sig} RSI:{r:.0f}*")
                 except: pass
