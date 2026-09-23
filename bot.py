@@ -3,20 +3,21 @@ from datetime import datetime, timedelta
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V105 POCKET OTTIMIZZATO ONLINE"
+def home():
+    return "V105.1 POCKET STRETTO 1 PELO ONLINE"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
-
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","NZDUSD=X","USDCHF=X",
-"USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X",
-"NZDJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X",
-"GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","AUDNZD=X","CADCHF=X","EURNZD=X"]
+         "USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X",
+         "NZDJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X",
+         "GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","AUDNZD=X","CADCHF=X","EURNZD=X"]
 
 WIN=0; LOSS=0; PEND={}; CHECK=0
 
 def send(m):
-    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
     except: pass
 
 def rsi(s,p=14):
@@ -25,10 +26,8 @@ def rsi(s,p=14):
     return 100-(100/(1+ag/al))
 
 def get_candles_pocket_style(pair):
-    # Tenta Pocket pubblico, se no Yahoo ma con correzione OTC
     symbol = pair.replace("=X","")
     try:
-        # Endpoint pubblico Pocket (funziona senza SSID per demo)
         r = requests.get(f"https://api-eu.po.market/history?symbol={symbol}_otc&period=300&count=300", timeout=3, headers={"User-Agent":"Mozilla/5.0"})
         if r.status_code == 200:
             j = r.json()
@@ -36,18 +35,16 @@ def get_candles_pocket_style(pair):
                 df = pd.DataFrame(j['candles'])
                 if 'close' in df.columns:
                     df = df.rename(columns={"open":"Open","close":"Close","high":"High","low":"Low"})
-                    return df
+                return df
     except: pass
-
-    # Fallback Yahoo = stesso prezzo Pocket per forex (99% uguale)
     df=yf.download(pair,period="10d",interval="5m",progress=False,auto_adjust=True)
-    if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+    if isinstance(df.columns,pd.MultiIndex):
+        df.columns=df.columns.get_level_values(0)
     return df
 
 def bot():
     global WIN,LOSS,CHECK
-    send("💀 *V105 POCKET OTTIMIZZATO 4 FILTRI ONLINE*\nOttimizzato per Pocket Option | No SSID\n25 coppie | CONTRARIO")
-
+    send("💀 *V105.1 POCKET STRETTO 1 PELO ONLINE*\nOttimizzato per Pocket | No SSID\n25 coppie | CONTRARIO | Filtri +10% stretti")
     while True:
         try:
             now=datetime.now()
@@ -56,17 +53,18 @@ def bot():
                 if now-t >= timedelta(minutes=5):
                     try:
                         df=yf.download(k,period="1d",interval="1m",progress=False,auto_adjust=True)
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+                        if isinstance(df.columns,pd.MultiIndex):
+                            df.columns=df.columns.get_level_values(0)
                         if len(df)==0: continue
                         c=float(df["Close"].iloc[-1])
                         w=(s=="BUY" and c>p) or (s=="SELL" and c<p)
                         if w: WIN+=1; R="✅ WIN"
                         else: LOSS+=1; R="❌ LOSS"
                         tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
-                        send(f"{R} *{k.replace('=X','')} {s}* {p:.5f}->{c:.5f} WR {wr:.0f}% ({WIN}W/{LOSS}L)\n👉 Pocket fai *{'SELL' if s=='BUY' else 'BUY'}*")
+                        pocket_wr = 100-wr if tot>0 else 0
+                        send(f"{R} *{k.replace('=X','')} {s}* {p:.5f}->{c:.5f} | BOT WR {wr:.0f}%\n💰 *POCKET CONTRARIO WIN {pocket_wr:.0f}%* ({LOSS}W/{WIN}L contrario)\n👉 Pocket fai *{'SELL' if s=='BUY' else 'BUY'}*")
                         del PEND[k]
                     except: pass
-
             if time.time()-CHECK >= 30:
                 CHECK=time.time()
                 for pair in PAIRS:
@@ -74,9 +72,9 @@ def bot():
                     try:
                         df = get_candles_pocket_style(pair)
                         if df is None or len(df)<210: continue
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+                        if isinstance(df.columns,pd.MultiIndex):
+                            df.columns=df.columns.get_level_values(0)
                         if "Close" not in df.columns: continue
-
                         df["RSI"]=rsi(df["Close"])
                         df["MA"]=df["Close"].rolling(20).mean()
                         df["STD"]=df["Close"].rolling(20).std()
@@ -85,22 +83,22 @@ def bot():
                         df["EMA200"]=df["Close"].ewm(span=200).mean()
                         df["BODY"]=abs(df["Close"]-df["Open"])
                         df["AVG_BODY"]=df["BODY"].rolling(20).mean()
-
                         c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
                         up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
                         ema=float(df["EMA200"].iloc[-1])
                         body=float(df["BODY"].iloc[-1]); avg_body=float(df["AVG_BODY"].iloc[-1])
-
-                        toll=(up-low)*0.15
-                        body_ok = body > (avg_body * 0.7)
-
+                        # --- STRETTO DI UN PELO ---
+                        toll=(up-low)*0.10 # prima 0.15
+                        body_ok = body > (avg_body * 0.9) # prima 0.7
+                        ema_dist_ok = abs(c-ema)/c > 0.0005 # NUOVO
                         sig=None
-                        if r>=63 and c>=up-toll and c<ema and body_ok: sig="BUY"
-                        elif r<=37 and c<=low+toll and c>ema and body_ok: sig="SELL"
-
+                        if r>=65 and c>=up-toll and c<ema and body_ok and ema_dist_ok:
+                            sig="BUY"
+                        elif r<=35 and c<=low+toll and c>ema and body_ok and ema_dist_ok:
+                            sig="SELL"
                         if sig:
                             PEND[pair]=(sig,c,now)
-                            send(f"💀 *5M {sig} {pair.replace('=X','')} RSI:{r:.0f} 4 FILTRI*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}* CONTRARIO")
+                            send(f"💀 *5M {sig} {pair.replace('=X','')} RSI:{r:.0f} STRETTO*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}* CONTRARIO")
                     except: pass
         except: pass
         time.sleep(1)
