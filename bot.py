@@ -10,10 +10,10 @@ def home():
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X",
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","NZDUSD=X","USDCHF=X",
          "USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X",
          "NZDJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X",
-         "GBPAUD=X","EURCAD=X","AUDCAD=X","CADCHF=X"]
+         "GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","AUDNZD=X","CADCHF=X","EURNZD=X"]
 
 WIN=0; LOSS=0; PEND={}; CHECK=0
 
@@ -68,8 +68,8 @@ def bot():
                         ema=float(df["EMA200"].iloc[-1])
                         sig=None
                         toll=(up-low)*0.10
-                        if r>=65 and c>=up-toll and c<ema: sig="BUY"
-                        elif r<=35 and c<=low+toll and c>ema: sig="SELL"
+                        if r>=63 and c>=up-toll and c<ema: sig="BUY"
+                        elif r<=37 and c<=low+toll and c>ema: sig="SELL"
                         if sig:
                             PEND[pair]=(sig,c,now)
                             send(f"💀 *5M {sig} {pair.replace('=X','')} 3 FILTRI RSI:{r:.0f}*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*")
