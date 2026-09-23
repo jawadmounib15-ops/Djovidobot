@@ -30,7 +30,7 @@ def rsi(s,p=14):
 
 def bot():
     global WIN,LOSS,CHECK
-    send("💀 *V105 3 FILTRI FISSO 0% WR ONLINE*\n25 coppie | Scan 30sec\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP")
+    send("💀 *V105 3 FILTRI FISSO 0% WR ONLINE*\n25 coppie | Scan 60sec\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP")
     while True:
         try:
             now=datetime.now()
@@ -49,7 +49,7 @@ def bot():
                         del PEND[k]
                     except: pass
 
-            if time.time()-CHECK >= 30:
+            if time.time()-CHECK >= 60:
                 CHECK=time.time()
                 for pair in PAIRS:
                     if pair in PEND: continue
