@@ -1,26 +1,20 @@
 import os, time, requests, yfinance as yf, threading, pandas as pd
 from datetime import datetime, timedelta
 from flask import Flask
-
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "V105 3 FILTRI 0% WR ONLINE"
+    return "V105 NO LAG 60SEC ONLINE"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X","GBPAUD=X","EURCAD=X","AUDCAD=X","CADCHF=X"]
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X",
-         "USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X",
-         "CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X",
-         "GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","CADCHF=X"]
-
-WIN=0; LOSS=0; PEND={}; CHECK=0
+WIN=0; LOSS=0; PEND={}; IDX=0
 
 def send(m):
     try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
     except: pass
 
 def rsi(s,p=14):
@@ -29,8 +23,8 @@ def rsi(s,p=14):
     return 100-(100/(1+ag/al))
 
 def bot():
-    global WIN,LOSS,CHECK
-    send("💀 *V105 3 FILTRI FISSO 0% WR ONLINE*\n25 coppie | Scan 60sec\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP")
+    global WIN,LOSS,IDX
+    send("💀 *V105 NO LAG 60SEC ONLINE*\n3 coppie per volta | Anti-freeze")
     while True:
         try:
             now=datetime.now()
@@ -45,41 +39,45 @@ def bot():
                         if w: WIN+=1; R="✅ WIN"
                         else: LOSS+=1; R="❌ LOSS"
                         tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
-                        send(f"{R} *{k.replace('=X','')} {s}* {p:.5f}->{c:.5f} WR {wr:.0f}% ({WIN}W/{LOSS}L)\n👉 Pocket fai *{'SELL' if s=='BUY' else 'BUY'}*")
+                        send(f"{R} *{k.replace('=X','')}* WR {wr:.0f}% ({WIN}W/{LOSS}L)\n👉 Pocket *{'SELL' if s=='BUY' else 'BUY'}*")
                         del PEND[k]
                     except: pass
 
-            if time.time()-CHECK >= 60:
-                CHECK=time.time()
-                for pair in PAIRS:
-                    if pair in PEND: continue
-                    try:
-                        df=yf.download(pair,period="10d",interval="5m",progress=False)
-                        if len(df)<210: continue
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-                        df["RSI"]=rsi(df["Close"])
-                        df["MA"]=df["Close"].rolling(20).mean()
-                        df["STD"]=df["Close"].rolling(20).std()
-                        df["UP"]=df["MA"]+2*df["STD"]
-                        df["LOW"]=df["MA"]-2*df["STD"]
-                        df["EMA200"]=df["Close"].ewm(span=200).mean()
-                        c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
-                        up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
-                        ema=float(df["EMA200"].iloc[-1])
-                        sig=None
-                        toll=(up-low)*0.25
-if r>=63 and c>=up-toll and c>ema:  # > ema non <
-    sig="BUY"
-elif r<=37 and c<=low+toll and c<ema:
-    sig="SELL"
-                        if sig:
-                            PEND[pair]=(sig,c,now)
-                            send(f"💀 *5M {sig} {pair.replace('=X','')} 3 FILTRI RSI:{r:.0f}*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*")
-                    except: pass
+            # NO LAG: solo 3 coppie ogni 60 sec
+            batch = PAIRS[IDX:IDX+3]
+            if not batch:
+                IDX=0
+                batch=PAIRS[0:3]
+            IDX+=3
+
+            for pair in batch:
+                if pair in PEND: continue
+                try:
+                    df=yf.download(pair,period="5d",interval="5m",progress=False) # 5d invece di 10d = più leggero
+                    if len(df)<210: continue
+                    if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+                    df["RSI"]=rsi(df["Close"])
+                    df["MA"]=df["Close"].rolling(20).mean()
+                    df["STD"]=df["Close"].rolling(20).std()
+                    df["UP"]=df["MA"]+2*df["STD"]
+                    df["LOW"]=df["MA"]-2*df["STD"]
+                    df["EMA200"]=df["Close"].ewm(span=200).mean()
+                    c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
+                    up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
+                    ema=float(df["EMA200"].iloc[-1])
+                    toll=(up-low)*0.25
+                    sig=None
+                    if r>=63 and c>=up-toll and c>ema: sig="BUY"
+                    elif r<=37 and c<=low+toll and c<ema: sig="SELL"
+                    if sig:
+                        PEND[pair]=(sig,c,now)
+                        send(f"💀 *5M {sig} {pair.replace('=X','')} RSI:{r:.0f}*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*")
+                except: pass
+                time.sleep(2) # 2 sec tra una coppia e l'altra = no ban yfinance
+
         except: pass
-        time.sleep(1)
+        time.sleep(60)
 
 threading.Thread(target=bot,daemon=True).start()
-
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
