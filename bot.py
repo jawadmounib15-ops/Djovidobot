@@ -30,7 +30,7 @@ def rsi(s,p=14):
 
 def bot():
     global WIN,LOSS,CHECK
-    send("💀 *V105 3 FILTRI FISSO 0% WR ONLINE*\n25 coppie | Scan 60sec\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP")
+    send("💀 *V105 3 FILTRI FISSO 0% WR ONLINE*\n25 coppie | Scan 30sec\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP")
     while True:
         try:
             now=datetime.now()
@@ -67,7 +67,7 @@ def bot():
                         up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
                         ema=float(df["EMA200"].iloc[-1])
                         sig=None
-                        toll=(up-low)*0.05
+                        toll=(up-low)*0.10
                         if r>=65 and c>=up-toll and c<ema: sig="BUY"
                         elif r<=35 and c<=low+toll and c>ema: sig="SELL"
                         if sig:
