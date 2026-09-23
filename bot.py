@@ -3,12 +3,12 @@ from datetime import datetime
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "BOT V110 REGOLE COMPLETE 75% LIVE"
+def home(): return "BOT V111 LARGO LIVE - 30 SEGNALI AL GIORNO"
 
 TOKEN=os.environ.get("TELEGRAM_TOKEN")
 CHAT=os.environ.get("TELEGRAM_CHAT_ID")
 
-PAIRS=["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURGBP=X"]
+PAIRS=["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURGBP=X","AUDUSD=X","NZDUSD=X","USDCAD=X","USDCHF=X","GBPCHF=X","EURCHF=X","CADJPY=X","CHFJPY=X"]
 
 def send(m):
  try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
@@ -18,23 +18,16 @@ def rsi(s,p=14):
  d=s.diff(); g=d.where(d>0,0); l=-d.where(d<0,0)
  return 100-(100/(1+g.ewm(alpha=1/p).mean()/l.ewm(alpha=1/p).mean()))
 
-def no_news():
- h=datetime.now().hour + datetime.now().minute/60
- if 13.5 <= h <= 16.5: return False
- if 8.5 <= h <= 10.5: return False
- return True
-
 def bot():
- send("🟢 *BOT V110 ACCESO - REGOLE ESECUZIONE COMPLETE*\nEMA200 + MACD Zero Cross + RSI 30/70 + No News + Payout 80%")
+ send("🔵 *BOT V111 LARGO ACCESO*\n30-50 segnali/giorno - Entra solo se vedi supporto/resistenza tuo!")
  while True:
   try:
-   if not no_news(): time.sleep(300); continue
    for pair in PAIRS:
     try:
-     df=yf.download(pair,period="5d",interval="5m",progress=False)
+     df=yf.download(pair,period="2d",interval="5m",progress=False)
      if len(df)<210: continue
      if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-
+     
      df["EMA200"]=df["Close"].ewm(span=200).mean()
      df["RSI"]=rsi(df["Close"])
      df["EMA12"]=df["Close"].ewm(span=12).mean()
@@ -48,28 +41,32 @@ def bot():
      r_prev=df["RSI"].iloc[-2]
      macd=df["MACD"].iloc[-1]
      macd_prev=df["MACD"].iloc[-2]
-     signal=df["SIGNAL"].iloc[-1]
-     signal_prev=df["SIGNAL"].iloc[-2]
+     sig=df["SIGNAL"].iloc[-1]
 
-     # CALL: Prezzo > EMA200 + MACD incrocia UP sopra ZERO + RSI risale da <30
-     call_price = c > ema
-     call_macd = macd_prev < signal_prev and macd > signal and macd > 0 and signal > 0
-     call_rsi = r_prev < 30 and r >= 30
+     # MOLTO LARGO - BASTA 1 CONDIZIONE!
+     buy_score = 0
+     if c > ema: buy_score += 1
+     if r < 50 and r > r_prev: buy_score += 1
+     if macd > macd_prev: buy_score += 1
+     if r < 40: buy_score += 1
 
-     # PUT: Prezzo < EMA200 + MACD incrocia DOWN sotto ZERO + RSI scende da >70
-     put_price = c < ema
-     put_macd = macd_prev > signal_prev and macd < signal and macd < 0 and signal < 0
-     put_rsi = r_prev > 70 and r <= 70
+     sell_score = 0
+     if c < ema: sell_score += 1
+     if r > 50 and r < r_prev: sell_score += 1
+     if macd < macd_prev: sell_score += 1
+     if r > 60: sell_score += 1
 
      nome=pair.replace('=X','')
-     if call_price and call_macd and call_rsi:
-      send(f"🟢 *{nome} CALL BUY 5m*\nPrezzo {c:.5f} > EMA200 {ema:.5f} ✅\nMACD {macd:.4f} incrocia UP sopra ZERO ✅\nRSI {r_prev:.0f}->{r:.0f} risale da <30 ✅\nPayout >=80% + No News ✅")
+     # Se ha 2 punti su 4 = MANDA SEGNALE
+     if buy_score >= 2:
+      send(f"🔵 *{nome} BUY {buy_score}/4*\nPrezzo {' >' if c>ema else ' <'} EMA200 | RSI {r:.0f} {'↗️' if r>r_prev else '↘️'} | MACD {'↗️' if macd>macd_prev else '↘️'}\n5m")
 
-     if put_price and put_macd and put_rsi:
-      send(f"🔴 *{nome} PUT SELL 5m*\nPrezzo {c:.5f} < EMA200 {ema:.5f} ✅\nMACD {macd:.4f} incrocia DOWN sotto ZERO ✅\nRSI {r_prev:.0f}->{r:.0f} scende da >70 ✅\nPayout >=80% + No News ✅")
+     if sell_score >= 2:
+      send(f"🔴 *{nome} SELL {sell_score}/4*\nPrezzo {' >' if c>ema else ' <'} EMA200 | RSI {r:.0f} {'↗️' if r>r_prev else '↘️'} | MACD {'↗️' if macd>macd_prev else '↘️'}\n5m")
+
     except: continue
-   time.sleep(300)
-  except: time.sleep(60)
+   time.sleep(120) # Ogni 2 minuti!
+  except: time.sleep(30)
 
 threading.Thread(target=bot,daemon=True).start()
 if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
