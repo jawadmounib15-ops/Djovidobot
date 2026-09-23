@@ -48,7 +48,7 @@ def bot():
                     ema=float(df["EMA200"].iloc[-1])
                     toll=(up-low)*0.05
                     sig=None
-                    if r>=30 and c>=up-toll and c>ema: sig="BUY"
+                    if r>=28 and c>=up-toll and c>ema: sig="BUY"
                     elif r<=70 and c<=low+toll and c<ema: sig="SELL"
                     if sig:
                         send(f"💀 *{pair.replace('=X','')} {sig} RSI:{r:.0f}*")
