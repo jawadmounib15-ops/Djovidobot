@@ -46,7 +46,7 @@ def bot():
                     c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
                     up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
                     ema=float(df["EMA200"].iloc[-1])
-                    toll=(up-low)*0.10
+                    toll=(up-low)*0.05
                     sig=None
                     if r>=35 and c>=up-toll and c>ema: sig="BUY"
                     elif r<=65 and c<=low+toll and c<ema: sig="SELL"
