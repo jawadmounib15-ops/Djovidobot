@@ -1,16 +1,16 @@
 import os, time, requests, yfinance as yf, threading, pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "V105 CORRETTO ONLINE"
+    return "V105 PULITO ONLINE"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","NZDUSD=X","EURCHF=X","CADJPY=X"]
 
-WIN=0; LOSS=0; PEND={}; IDX=0
+IDX=0
 
 def send(m):
     try:
@@ -23,35 +23,16 @@ def rsi(s,p=14):
     return 100-(100/(1+ag/al))
 
 def bot():
-    global WIN,LOSS,IDX
-    send("💀 *V105 CORRETTO ONLINE*")
+    global IDX
+    send("💀 *V105 PULITO ONLINE*")
     while True:
         try:
-            now=datetime.now()
-            for k in list(PEND.keys()):
-                s,p,t = PEND[k]
-                if now-t >= timedelta(minutes=5):
-                    try:
-                        df=yf.download(k,period="1d",interval="1m",progress=False)
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-                        c=float(df["Close"].iloc[-1])
-                        pocket = "SELL" if s=="BUY" else "BUY"
-                        w = (pocket=="BUY" and c>p) or (pocket=="SELL" and c<p)
-                        if w: WIN+=1; R="✅ WIN"
-                        else: LOSS+=1; R="❌ LOSS"
-                        tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
-                        send(f"{R} *{k.replace('=X','')} Pocket {pocket}* WR {wr:.0f}% ({WIN}W/{LOSS}L)")
-                        del PEND[k]
-                    except: pass
-
             batch = PAIRS[IDX:IDX+3]
             if not batch:
                 IDX=0
                 batch=PAIRS[0:3]
             IDX+=3
-
             for pair in batch:
-                if pair in PEND: continue
                 try:
                     df=yf.download(pair,period="5d",interval="5m",progress=False)
                     if len(df)<210: continue
@@ -70,9 +51,7 @@ def bot():
                     if r>=63 and c>=up-toll and c>ema: sig="BUY"
                     elif r<=37 and c<=low+toll and c<ema: sig="SELL"
                     if sig:
-                        PEND[pair]=(sig,c,now)
-                        pocket = "SELL" if sig=="BUY" else "BUY"
-                        send(f"💀 *{pair.replace('=X','')} {sig} -> POCKET {pocket} RSI:{r:.0f}*")
+                        send(f"💀 *{pair.replace('=X','')} {sig} RSI:{r:.0f}*")
                 except: pass
                 time.sleep(2)
         except: pass
