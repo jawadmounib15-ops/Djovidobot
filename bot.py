@@ -4,11 +4,11 @@ from flask import Flask
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "V105 NO LAG 60SEC ONLINE"
+    return "V105 CORRETTO ONLINE"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X","GBPAUD=X","EURCAD=X","AUDCAD=X","CADCHF=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","NZDUSD=X","EURCHF=X","CADJPY=X"]
 
 WIN=0; LOSS=0; PEND={}; IDX=0
 
@@ -24,7 +24,7 @@ def rsi(s,p=14):
 
 def bot():
     global WIN,LOSS,IDX
-    send("💀 *V105 NO LAG 60SEC ONLINE*\n3 coppie per volta | Anti-freeze")
+    send("💀 *V105 CORRETTO ONLINE*")
     while True:
         try:
             now=datetime.now()
@@ -35,15 +35,15 @@ def bot():
                         df=yf.download(k,period="1d",interval="1m",progress=False)
                         if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
                         c=float(df["Close"].iloc[-1])
-                        w=(s=="BUY" and c>p) or (s=="SELL" and c<p)
+                        pocket = "SELL" if s=="BUY" else "BUY"
+                        w = (pocket=="BUY" and c>p) or (pocket=="SELL" and c<p)
                         if w: WIN+=1; R="✅ WIN"
                         else: LOSS+=1; R="❌ LOSS"
                         tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
-                        send(f"{R} *{k.replace('=X','')}* WR {wr:.0f}% ({WIN}W/{LOSS}L)\n👉 Pocket *{'SELL' if s=='BUY' else 'BUY'}*")
+                        send(f"{R} *{k.replace('=X','')} Pocket {pocket}* WR {wr:.0f}% ({WIN}W/{LOSS}L)")
                         del PEND[k]
                     except: pass
 
-            # NO LAG: solo 3 coppie ogni 60 sec
             batch = PAIRS[IDX:IDX+3]
             if not batch:
                 IDX=0
@@ -53,7 +53,7 @@ def bot():
             for pair in batch:
                 if pair in PEND: continue
                 try:
-                    df=yf.download(pair,period="5d",interval="5m",progress=False) # 5d invece di 10d = più leggero
+                    df=yf.download(pair,period="5d",interval="5m",progress=False)
                     if len(df)<210: continue
                     if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
                     df["RSI"]=rsi(df["Close"])
@@ -71,10 +71,10 @@ def bot():
                     elif r<=37 and c<=low+toll and c<ema: sig="SELL"
                     if sig:
                         PEND[pair]=(sig,c,now)
-                        send(f"💀 *5M {sig} {pair.replace('=X','')} RSI:{r:.0f}*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*")
+                        pocket = "SELL" if sig=="BUY" else "BUY"
+                        send(f"💀 *{pair.replace('=X','')} {sig} -> POCKET {pocket} RSI:{r:.0f}*")
                 except: pass
-                time.sleep(2) # 2 sec tra una coppia e l'altra = no ban yfinance
-
+                time.sleep(2)
         except: pass
         time.sleep(60)
 
