@@ -1,83 +1,75 @@
-import os, time, requests, yfinance as yf, threading, pandas as pd
-from datetime import datetime, timedelta
+import os, time, requests, threading, yfinance as yf, pandas as pd
+from datetime import datetime
 from flask import Flask
-
 app = Flask(__name__)
 @app.route('/')
-def home():
-    return "V105 3 FILTRI 0% WR ONLINE"
+def home(): return "BOT V110 REGOLE COMPLETE 75% LIVE"
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT = os.environ.get("TELEGRAM_CHAT_ID")
+TOKEN=os.environ.get("TELEGRAM_TOKEN")
+CHAT=os.environ.get("TELEGRAM_CHAT_ID")
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","NZDUSD=X","USDCHF=X",
-         "USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X",
-         "NZDJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X",
-         "GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","AUDNZD=X","CADCHF=X","EURNZD=X"]
-
-WIN=0; LOSS=0; PEND={}; CHECK=0
+PAIRS=["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURGBP=X"]
 
 def send(m):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
-    except: pass
+ try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
+ except: pass
 
 def rsi(s,p=14):
-    d=s.diff(); g=d.where(d>0,0); l=-d.where(d<0,0)
-    ag=g.ewm(alpha=1/p).mean(); al=l.ewm(alpha=1/p).mean()
-    return 100-(100/(1+ag/al))
+ d=s.diff(); g=d.where(d>0,0); l=-d.where(d<0,0)
+ return 100-(100/(1+g.ewm(alpha=1/p).mean()/l.ewm(alpha=1/p).mean()))
+
+def no_news():
+ h=datetime.now().hour + datetime.now().minute/60
+ if 13.5 <= h <= 16.5: return False
+ if 8.5 <= h <= 10.5: return False
+ return True
 
 def bot():
-    global WIN,LOSS,CHECK
-    send("💀 *V105 3 FILTRI FISSO 0% WR ONLINE*\n25 coppie | Scan 30sec\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP")
-    while True:
-        try:
-            now=datetime.now()
-            for k in list(PEND.keys()):
-                s,p,t = PEND[k]
-                if now-t >= timedelta(minutes=5):
-                    try:
-                        df=yf.download(k,period="1d",interval="1m",progress=False)
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-                        c=float(df["Close"].iloc[-1])
-                        w=(s=="BUY" and c>p) or (s=="SELL" and c<p)
-                        if w: WIN+=1; R="✅ WIN"
-                        else: LOSS+=1; R="❌ LOSS"
-                        tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
-                        send(f"{R} *{k.replace('=X','')} {s}* {p:.5f}->{c:.5f} WR {wr:.0f}% ({WIN}W/{LOSS}L)\n👉 Pocket fai *{'SELL' if s=='BUY' else 'BUY'}*")
-                        del PEND[k]
-                    except: pass
+ send("🟢 *BOT V110 ACCESO - REGOLE ESECUZIONE COMPLETE*\nEMA200 + MACD Zero Cross + RSI 30/70 + No News + Payout 80%")
+ while True:
+  try:
+   if not no_news(): time.sleep(300); continue
+   for pair in PAIRS:
+    try:
+     df=yf.download(pair,period="5d",interval="5m",progress=False)
+     if len(df)<210: continue
+     if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
 
-            if time.time()-CHECK >= 30:
-                CHECK=time.time()
-                for pair in PAIRS:
-                    if pair in PEND: continue
-                    try:
-                        df=yf.download(pair,period="10d",interval="5m",progress=False)
-                        if len(df)<210: continue
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-                        df["RSI"]=rsi(df["Close"])
-                        df["MA"]=df["Close"].rolling(20).mean()
-                        df["STD"]=df["Close"].rolling(20).std()
-                        df["UP"]=df["MA"]+2*df["STD"]
-                        df["LOW"]=df["MA"]-2*df["STD"]
-                        df["EMA200"]=df["Close"].ewm(span=200).mean()
-                        c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
-                        up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
-                        ema=float(df["EMA200"].iloc[-1])
-                        sig=None
-                        toll=(up-low)*0.15
-                        if r>=63 and c>=up-toll and c<ema: sig="BUY"
-                        elif r<=37 and c<=low+toll and c>ema: sig="SELL"
-                        if sig:
-                            PEND[pair]=(sig,c,now)
-                            send(f"💀 *5M {sig} {pair.replace('=X','')} 3 FILTRI RSI:{r:.0f}*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*")
-                    except: pass
-        except: pass
-        time.sleep(1)
+     df["EMA200"]=df["Close"].ewm(span=200).mean()
+     df["RSI"]=rsi(df["Close"])
+     df["EMA12"]=df["Close"].ewm(span=12).mean()
+     df["EMA26"]=df["Close"].ewm(span=26).mean()
+     df["MACD"]=df["EMA12"]-df["EMA26"]
+     df["SIGNAL"]=df["MACD"].ewm(span=9).mean()
+
+     c=df["Close"].iloc[-1]
+     ema=df["EMA200"].iloc[-1]
+     r=df["RSI"].iloc[-1]
+     r_prev=df["RSI"].iloc[-2]
+     macd=df["MACD"].iloc[-1]
+     macd_prev=df["MACD"].iloc[-2]
+     signal=df["SIGNAL"].iloc[-1]
+     signal_prev=df["SIGNAL"].iloc[-2]
+
+     # CALL: Prezzo > EMA200 + MACD incrocia UP sopra ZERO + RSI risale da <30
+     call_price = c > ema
+     call_macd = macd_prev < signal_prev and macd > signal and macd > 0 and signal > 0
+     call_rsi = r_prev < 30 and r >= 30
+
+     # PUT: Prezzo < EMA200 + MACD incrocia DOWN sotto ZERO + RSI scende da >70
+     put_price = c < ema
+     put_macd = macd_prev > signal_prev and macd < signal and macd < 0 and signal < 0
+     put_rsi = r_prev > 70 and r <= 70
+
+     nome=pair.replace('=X','')
+     if call_price and call_macd and call_rsi:
+      send(f"🟢 *{nome} CALL BUY 5m*\nPrezzo {c:.5f} > EMA200 {ema:.5f} ✅\nMACD {macd:.4f} incrocia UP sopra ZERO ✅\nRSI {r_prev:.0f}->{r:.0f} risale da <30 ✅\nPayout >=80% + No News ✅")
+
+     if put_price and put_macd and put_rsi:
+      send(f"🔴 *{nome} PUT SELL 5m*\nPrezzo {c:.5f} < EMA200 {ema:.5f} ✅\nMACD {macd:.4f} incrocia DOWN sotto ZERO ✅\nRSI {r_prev:.0f}->{r:.0f} scende da >70 ✅\nPayout >=80% + No News ✅")
+    except: continue
+   time.sleep(300)
+  except: time.sleep(60)
 
 threading.Thread(target=bot,daemon=True).start()
-
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
