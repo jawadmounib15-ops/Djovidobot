@@ -2,14 +2,18 @@ import os, time, requests, threading, pandas as pd
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "BOT V9 POCKET REAL 100% ONLINE"
+def home(): return "BOT V9 REAL+OTC PINBAR 100% ONLINE"
 
 TOKEN=os.environ.get("TELEGRAM_TOKEN")
 CHAT=os.environ.get("TELEGRAM_CHAT_ID")
 EMAIL=os.environ.get("POCKET_EMAIL")
 PASSWORD=os.environ.get("POCKET_PASSWORD")
 
-NAMES=["EURUSD_otc","GBPUSD_otc","USDJPY_otc","EURJPY_otc","GBPJPY_otc","AUDJPY_otc","USDCHF_otc","AUDUSD_otc","NZDUSD_otc","EURGBP_otc"]
+# COPPIE REALI + OTC - TUTTE QUELLE DI POCKET
+NAMES=[
+"EURUSD","GBPUSD","USDJPY","EURJPY","GBPJPY","AUDJPY","USDCHF","AUDUSD","NZDUSD","EURGBP","USDCAD",
+"EURUSD_otc","GBPUSD_otc","USDJPY_otc","EURJPY_otc","GBPJPY_otc","AUDJPY_otc","USDCHF_otc","AUDUSD_otc","NZDUSD_otc","EURGBP_otc","USDCAD_otc","GBPCHF_otc","AUDCAD_otc","AUDCHF_otc","AUDNZD_otc","CADJPY_otc","CHFJPY_otc","EURAUD_otc","EURCAD_otc","EURNZD_otc","GBPAUD_otc","NZDJPY_otc","EURCHF_otc","GBPCAD_otc"
+]
 
 last={}
 def send(m):
@@ -40,21 +44,19 @@ def check(df):
     return None
 
 def bot():
-    send("🔄 Provo login reale Pocket...")
+    send("🔄 Provo login Pocket REAL+OTC...")
     try:
         from pocketoptionapi.stable_api import PocketOption
         api=PocketOption(EMAIL,PASSWORD)
-        ok=api.connect()
-        if not ok:
-            send("❌ Login libreria fallito, controllo...")
-            time.sleep(5)
+        if not api.connect():
+            send("❌ Login fallito")
             return
-        send("✅✅ *LOGIN POCKET REALE OK!*\nOra leggo candele OTC vere 1:1")
+        send(f"✅ *LOGIN OK!*\nLeggo {len(NAMES)} coppie REALI + OTC vere!")
         while True:
             for sym in NAMES:
                 try:
                     if sym in last and time.time()-last[sym]<900: continue
-                    candles=api.get_candles(sym, 60, 250) # 60 = 1 minuto, 250 candele
+                    candles=api.get_candles(sym, 60, 250)
                     if not candles or len(candles)<210: continue
                     df=pd.DataFrame(candles, columns=["Time","Open","Close","High","Low"])
                     res=check(df)
@@ -62,16 +64,13 @@ def bot():
                         side,ratio,rp,r=res
                         last[sym]=time.time()
                         icon="🔵" if side=="BUY" else "🔴"
-                        send(f"📌{icon} *{sym.upper()} POCKET REALE {side}*\nCandele vere OTC ✅\nForma {ratio:.1f}x RSI {rp:.0f}->{r:.0f}\n5m {side}!")
-                except Exception as e:
-                    print(e)
-                    continue
-            time.sleep(5) # controlla ogni 5 sec, è real-time!
+                        tipo="OTC" if "otc" in sym else "REALE"
+                        send(f"📌{icon} *{sym.upper()} {tipo} PINBAR {side}*\nCandele vere Pocket ✅\nForma {ratio:.1f}x RSI {rp:.0f}->{r:.0f}\n5m {side}!")
+                except: continue
+            time.sleep(5)
     except Exception as e:
-        send(f"❌ Errore libreria: {e}\nRiprovo tra 30sec")
-        time.sleep(30)
+        send(f"❌ Errore: {e}")
 
 threading.Thread(target=bot,daemon=True).start()
-
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
