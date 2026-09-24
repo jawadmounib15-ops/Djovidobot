@@ -1,107 +1,83 @@
-import os, time, requests, threading, yfinance as yf, pandas as pd
+import os, time, requests, yfinance as yf, threading, pandas as pd
+from datetime import datetime, timedelta
 from flask import Flask
+
 app = Flask(__name__)
 @app.route('/')
-def home(): return "BOT V117 REALI ANTI-PERDITA LIVE"
+def home():
+    return "V105 3 FILTRI 0% WR ONLINE"
 
-TOKEN=os.environ.get("TELEGRAM_TOKEN")
-CHAT=os.environ.get("TELEGRAM_CHAT_ID")
-PAIRS=["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDJPY=X","USDCHF=X","AUDUSD=X","NZDUSD=X","EURGBP=X","USDCAD=X","GBPCHF=X"]
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 
-# ANTI-SPAM: non rimanda stesso segnale per 15 min
-last_signal = {}
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","NZDUSD=X","USDCHF=X",
+         "USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X",
+         "NZDJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X",
+         "GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","AUDNZD=X","CADCHF=X","EURNZD=X"]
+
+WIN=0; LOSS=0; PEND={}; CHECK=0
 
 def send(m):
-    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
+    try:
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+        json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
     except: pass
 
 def rsi(s,p=14):
     d=s.diff(); g=d.where(d>0,0); l=-d.where(d<0,0)
-    return 100-(100/(1+g.ewm(alpha=1/p).mean()/l.ewm(alpha=1/p).mean()))
+    ag=g.ewm(alpha=1/p).mean(); al=l.ewm(alpha=1/p).mean()
+    return 100-(100/(1+ag/al))
 
 def bot():
-    send("💎 *BOT V117 REALI ANTI-PERDITA ACCESO*\nFIX SELL JPY - No più RSI 76->71 fake")
+    global WIN,LOSS,CHECK
+    send("💀 *V105 3 FILTRI FISSO 0% WR ONLINE*\n25 coppie | Scan 30sec\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP")
     while True:
         try:
-            for pair in PAIRS:
-                try:
-                    df=yf.download(pair,period="3d",interval="1m",progress=False)
-                    if len(df)<210: continue
-                    if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+            now=datetime.now()
+            for k in list(PEND.keys()):
+                s,p,t = PEND[k]
+                if now-t >= timedelta(minutes=5):
+                    try:
+                        df=yf.download(k,period="1d",interval="1m",progress=False)
+                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+                        c=float(df["Close"].iloc[-1])
+                        w=(s=="BUY" and c>p) or (s=="SELL" and c<p)
+                        if w: WIN+=1; R="✅ WIN"
+                        else: LOSS+=1; R="❌ LOSS"
+                        tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
+                        send(f"{R} *{k.replace('=X','')} {s}* {p:.5f}->{c:.5f} WR {wr:.0f}% ({WIN}W/{LOSS}L)\n👉 Pocket fai *{'SELL' if s=='BUY' else 'BUY'}*")
+                        del PEND[k]
+                    except: pass
 
-                    df["EMA50"]=df["Close"].ewm(span=50).mean()
-                    df["EMA200"]=df["Close"].ewm(span=200).mean()
-                    df["EMA50_prev"]=df["EMA50"].shift(5)
-                    df["RSI"]=rsi(df["Close"])
-                    df["MACD"]=df["Close"].ewm(span=12).mean()-df["Close"].ewm(span=26).mean()
-                    df["SIGNAL"]=df["MACD"].ewm(span=9).mean()
-                    df["MA20"]=df["Close"].rolling(20).mean()
-                    df["STD"]=df["Close"].rolling(20).std()
-                    df["LOW"]=df["MA20"]-2*df["STD"]
-                    df["UP"]=df["MA20"]+2*df["STD"]
-
-                    c=df["Close"].iloc[-1]
-                    o=df["Open"].iloc[-1]
-                    ema50=df["EMA50"].iloc[-1]
-                    ema50_prev=df["EMA50_prev"].iloc[-1]
-                    ema200=df["EMA200"].iloc[-1]
-                    r=df["RSI"].iloc[-1]
-                    r_prev=df["RSI"].iloc[-2]
-                    r_prev2=df["RSI"].iloc[-3]
-                    macd=df["MACD"].iloc[-1]
-                    macd_prev=df["MACD"].iloc[-2]
-                    sig=df["SIGNAL"].iloc[-1]
-                    low=df["LOW"].iloc[-1]
-                    up=df["UP"].iloc[-1]
-
-                    nome=pair.replace("=X","")
-
-                    # FILTRO ANTI-SPAM
-                    key = f"{nome}"
-                    if key in last_signal and time.time() - last_signal[key] < 900: # 15 min
-                        continue
-
-                    # ===== V117 FIX SELL: PIU SEVERO =====
-                    # 1. Candela BEAR obbligatoria
-                    bear_candle = c < o
-                    # 2. EMA50 deve SCENDERE veramente (slope giù)
-                    ema50_down = ema50 < ema50_prev
-                    # 3. RSI deve scendere FORTE almeno 3 punti, non 1
-                    rsi_drop_strong = (r_prev - r) >= 3.0 and r > 65
-                    # 4. RSI era >72 prima (ipercomprato vero, non 76->71)
-                    was_overbought = r_prev2 > 72 or r_prev > 72
-
-                    sell_score=0
-                    if c < ema200 and ema50 < ema200 and c < ema50: sell_score+=1
-                    if rsi_drop_strong and was_overbought: sell_score+=1
-                    if macd_prev > sig and macd < sig: sell_score+=1
-                    if c >= up*0.995 and bear_candle: sell_score+=1
-                    if r_prev > 70 and ema50_down: sell_score+=1
-
-                    # ===== BUY: uguale ma con filtro bull =====
-                    bull_candle = c > o
-                    ema50_up = ema50 > ema50_prev
-                    rsi_rise_strong = (r - r_prev) >= 3.0 and r < 35
-                    was_oversold = r_prev2 < 28 or r_prev < 28
-
-                    buy_score=0
-                    if c > ema200 and ema50 > ema200 and c > ema50: buy_score+=1
-                    if rsi_rise_strong and was_oversold: buy_score+=1
-                    if macd_prev < sig and macd > sig: buy_score+=1
-                    if c <= low*1.005 and bull_candle: buy_score+=1
-                    if r_prev < 30 and ema50_up: buy_score+=1
-
-                    if buy_score>=4:
-                        last_signal[key]=time.time()
-                        send(f"🔵 *{nome} BUY {buy_score}/5 FORTE V117*\nEMA50>200 + UP ✅ RSI {r_prev:.0f}->{r:.0f} +{r-r_prev:.0f} ✅ MACD X-UP ✅ Boll LOW + Bull ✅\n5m")
-
-                    if sell_score>=4:
-                        last_signal[key]=time.time()
-                        send(f"🔴 *{nome} SELL {sell_score}/5 FORTE V117*\nEMA50<200 + DOWN ✅ RSI {r_prev:.0f}->{r:.0f} -{r_prev-r:.0f} ✅ MACD X-DOWN + Bear ✅\n5m")
-
-                except: continue
-            time.sleep(60)
-        except: time.sleep(30)
+            if time.time()-CHECK >= 30:
+                CHECK=time.time()
+                for pair in PAIRS:
+                    if pair in PEND: continue
+                    try:
+                        df=yf.download(pair,period="10d",interval="5m",progress=False)
+                        if len(df)<210: continue
+                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+                        df["RSI"]=rsi(df["Close"])
+                        df["MA"]=df["Close"].rolling(20).mean()
+                        df["STD"]=df["Close"].rolling(20).std()
+                        df["UP"]=df["MA"]+2*df["STD"]
+                        df["LOW"]=df["MA"]-2*df["STD"]
+                        df["EMA200"]=df["Close"].ewm(span=200).mean()
+                        c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
+                        up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
+                        ema=float(df["EMA200"].iloc[-1])
+                        sig=None
+                        toll=(up-low)*0.25
+                        if r>=63 and c>=up-toll and c<ema: sig="BUY"
+                        elif r<=37 and c<=low+toll and c>ema: sig="SELL"
+                        if sig:
+                            PEND[pair]=(sig,c,now)
+                            send(f"💀 *5M {sig} {pair.replace('=X','')} 3 FILTRI RSI:{r:.0f}*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*")
+                    except: pass
+        except: pass
+        time.sleep(1)
 
 threading.Thread(target=bot,daemon=True).start()
-if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+
+if __name__=="__main__":
+    app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
