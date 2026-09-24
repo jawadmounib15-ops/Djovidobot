@@ -3,3 +3,4 @@ pandas
 requests
 websocket-client
 pocketoptionapi
+yfinance
