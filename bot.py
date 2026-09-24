@@ -1,104 +1,129 @@
-import os, time, json, requests, threading, pandas as pd, websocket
+import os, time, threading, requests, json
 from flask import Flask
+import websocket
+import statistics
 app = Flask(__name__)
 @app.route('/')
-def home(): return "BOT V13 FINALE 26 REALI+OTC SSID ONLINE"
+def home(): return "V14 PINBAR 26 + SQUEEZE 13 REALI LIVE"
 
-TOKEN=os.environ.get("TELEGRAM_TOKEN")
-CHAT=os.environ.get("TELEGRAM_CHAT_ID")
-SSID=os.environ.get("POCKET_SSID")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+POCKET_SSID = os.getenv("POCKET_SSID")
 
-SYMBOLS=["EURUSD","GBPUSD","USDJPY","EURJPY","GBPJPY","AUDJPY","USDCHF","AUDUSD","NZDUSD","EURGBP","USDCAD","EURCHF","AUDCAD","NZDJPY","EURUSD_otc","GBPUSD_otc","USDJPY_otc","EURJPY_otc","GBPJPY_otc","AUDJPY_otc","AUDUSD_otc","EURGBP_otc","USDCHF_otc","EURCHF_otc","AUDCAD_otc","GBPCHF_otc"]
+PAIRS_ALL = ["EURUSD","EURUSD_otc","GBPUSD","GBPUSD_otc","USDJPY","USDJPY_otc","AUDUSD","AUDUSD_otc","USDCAD","USDCAD_otc","EURJPY","EURJPY_otc","GBPJPY","GBPJPY_otc","EURGBP","EURGBP_otc","AUDJPY","AUDJPY_otc","NZDUSD","NZDUSD_otc","USDCHF","USDCHF_otc","EURCHF","EURCHF_otc","CADJPY","CADJPY_otc"]
+PAIRS_REAL_ONLY = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","EURJPY","GBPJPY","EURGBP","AUDJPY","NZDUSD","USDCHF","EURCHF","CADJPY"]
 
-last={}; ssid_alert_sent=False
+sent = {}
+def send_tg(msg):
+    try:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode":"Markdown"}, timeout=10)
+    except: pass
 
-def send(m):
- try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=15)
- except: pass
+def get_candles_pocket(pair, period=300, count=30):
+    candles=[]
+    try:
+        def on_message(ws, message):
+            if message.startswith('42'):
+                try:
+                    d=json.loads(message[2:])
+                    if isinstance(d,list) and len(d)>1 and 'candles' in str(d):
+                        for c in d[1].get('candles',[]): candles.append(c)
+                except: pass
+        ws=websocket.WebSocketApp(f"wss://api-eu.po.market/socket.io/?EIO=3&transport=websocket", on_message=on_message)
+        def run():
+            time.sleep(1)
+            try:
+                ws.send("40"); time.sleep(0.5)
+                ws.send(f'42["auth",{{"session":"{POCKET_SSID}"}}]'); time.sleep(0.8)
+                clean=pair.replace("_otc","").replace("_","").upper()
+                ws.send(f'42["changeSymbol",{{"asset":"{clean}","period":{period}}}]')
+                if "_otc" in pair.lower():
+                    time.sleep(0.3); ws.send(f'42["changeSymbol",{{"asset":"{clean}_otc","period":{period}}}]')
+                time.sleep(2); ws.close()
+            except: pass
+        t=threading.Thread(target=run, daemon=True); t.start()
+        ws.run_forever(ping_timeout=5); t.join(timeout=4)
+    except: pass
+    return candles[-30:] if len(candles)>=10 else []
 
-def rsi(s,p=14):
- d=s.diff(); g=d.where(d>0,0); l=-d.where(d<0,0)
- rs=g.ewm(alpha=1/p).mean()/l.ewm(alpha=1/p).mean()
- return 100-(100/(1+rs))
+def rsi(closes, period=14):
+    if len(closes)<period+1: return 50
+    gains=[]; losses=[]
+    for i in range(1,len(closes)):
+        d=closes[i]-closes[i-1]; gains.append(max(d,0)); losses.append(max(-d,0))
+    avg_g=sum(gains[-period:])/period; avg_l=sum(losses[-period:])/period
+    if avg_l==0: return 70 if avg_g>0 else 50
+    return 100-(100/(1+avg_g/avg_l))
 
-def check_pinbar(df):
- if len(df)<210: return None
- df["EMA200"]=df["Close"].ewm(span=200).mean()
- df["RSI"]=rsi(df["Close"])
- df["MA20"]=df["Close"].rolling(20).mean()
- df["STD"]=df["Close"].rolling(20).std()
- df["LOW"]=df["MA20"]-2*df["STD"]
- df["UP"]=df["MA20"]+2*df["STD"]
- c=float(df["Close"].iloc[-1]); o=float(df["Open"].iloc[-1]); h=float(df["High"].iloc[-1]); l=float(df["Low"].iloc[-1])
- ema=float(df["EMA200"].iloc[-1]); r=float(df["RSI"].iloc[-1]); rp=float(df["RSI"].iloc[-2]); low=float(df["LOW"].iloc[-1]); up=float(df["UP"].iloc[-1])
- body=abs(c-o); total=h-l
- if body==0 or total==0: return None
- up_w=h-max(c,o); lw=min(c,o)-l
- # FIX BUY/SELL GIUSTO
- bull=lw/body>=2.2 and lw/body<=6.0 and body<=total*0.35 and c>o and lw>=total*0.60 and (l<=low*1.01 or l<=ema*1.001) and 22<r<38 and r>rp
- bear=up_w/body>=2.2 and up_w/body<=6.0 and body<=total*0.35 and c<o and up_w>=total*0.60 and (h>=up*0.99 or h>=ema*0.999) and 58<r<85 and r<rp
- if bull: return "BUY",lw/body,rp,r
- if bear: return "SELL",up_w/body,rp,r
- return None
+def bollinger(closes, period=20, std=2):
+    if len(closes)<period: return None,None,None,None
+    ma=statistics.mean(closes[-period:]); st=statistics.stdev(closes[-period:]) if len(closes[-period:])>1 else 0
+    return ma+std*st, ma-std*st, ma, (2*std*st)/ma if ma!=0 else 0
 
-def get_candles(symbol):
- global ssid_alert_sent
- try:
-  ws=websocket.create_connection("wss://api-eu.po.market/socket.io/?EIO=3&transport=websocket",timeout=12)
-  ws.send(SSID)
-  time.sleep(1.2)
-  ws.send(f'42["changeSymbol",{{"asset":"{symbol}","period":60}}]')
-  start=time.time(); cnd=[]
-  while time.time()-start<4.5:
-   try:
-    msg=ws.recv()
-    if msg=='2': ws.send('3'); continue
-    if 'auth' in msg and 'session' not in msg and 'isDemo' not in msg:
-        if not ssid_alert_sent:
-            send("🚨 *SSID SCADUTO PA!*\nCopia nuovo SSID su Render!")
-            ssid_alert_sent=True
-        ws.close(); return None
-    if '"history"' in msg or '"candles"' in msg or '"open"' in msg:
+def check_pinbar(candles):
+    if len(candles)<5: return None
+    last=candles[-2] if len(candles)>=2 else candles[-1]
+    try:
+        if isinstance(last, dict): o=float(last.get('open',0)); c=float(last.get('close',0)); h=float(last.get('high',0)); l=float(last.get('low',0))
+        elif isinstance(last,(list,tuple)) and len(last)>=5: o=float(last[1]); c=float(last[2]); h=float(last[3]); l=float(last[4])
+        else: return None
+        body=abs(c-o) or 0.00001; up_w=h-max(o,c); lw=min(o,c)-l
+        closes=[];
+        for x in candles[-20:]:
+            try:
+                if isinstance(x,dict): closes.append(float(x.get('close',0)))
+                elif isinstance(x,(list,tuple)): closes.append(float(x[2]))
+            except: pass
+        r=rsi(closes)
+        if lw/body>=2.0 and lw>up_w*1.5 and 22<=r<=38: return "BUY", f"Pinbar BUY coda sotto {lw/body:.1f}x RSI {r:.0f}"
+        if up_w/body>=2.0 and up_w>lw*1.5 and 58<=r<=82: return "SELL", f"Pinbar SELL coda sopra {up_w/body:.1f}x RSI {r:.0f}"
+    except: pass
+    return None
+
+def check_squeeze(candles):
+    if len(candles)<22: return None
+    closes=[]
+    for x in candles[-22:]:
         try:
-            j=json.loads(msg[2:]); d=j[1] if len(j)>1 else j
-            lst=d if isinstance(d,list) else d.get('history',[]) if isinstance(d,dict) else []
-            for x in lst:
-                if isinstance(x,dict) and 'open' in x: cnd.append(x)
+            if isinstance(x,dict): closes.append(float(x.get('close',0)))
+            elif isinstance(x,(list,tuple)): closes.append(float(x[2]))
         except: pass
-   except: break
-  ws.close()
-  ssid_alert_sent=False
-  if len(cnd)>=210:
-   df=pd.DataFrame(cnd[-250:])
-   df=df.rename(columns={"open":"Open","close":"Close","high":"High","low":"Low"})
-   return df[["Open","Close","High","Low"]].astype(float)
- except Exception as e:
-  print(f"err {symbol} {e}")
-  return None
+    if len(closes)<21: return None
+    widths=[]
+    for i in range(len(closes)-8, len(closes)):
+        up,low,ma,w=bollinger(closes[:i+1])
+        if w is not None: widths.append(w)
+    if len(widths)<6: return None
+    avg_w=statistics.mean(widths[:-2]); last_w=widths[-1]
+    up,low,ma,w=bollinger(closes)
+    if up is None: return None
+    r=rsi(closes); last_close=closes[-1]
+    if avg_w<0.0025 and last_w<0.0035:
+        if last_close>up and 52<=r<=68: return "BUY", f"SQUEEZE BREAKOUT UP banda {last_w:.4f} RSI {r:.0f}"
+        if last_close<low and 32<=r<=48: return "SELL", f"SQUEEZE BREAKOUT DOWN banda {last_w:.4f} RSI {r:.0f}"
+    return None
 
 def bot_loop():
- if not SSID:
-  send("❌ Metti POCKET_SSID su Render!")
-  return
- send("✅ *BOT V13 FINALE ONLINE*\n26 coppie REALI+OTC\nCandele VERE Pocket ✅\nBUY/SELL FIX OK\nAvviso scadenza ON")
- while True:
-  for sym in SYMBOLS:
-   try:
-    if sym in last and time.time()-last[sym]<900: continue
-    df=get_candles(sym)
-    if df is None or len(df)<210: continue
-    res=check_pinbar(df)
-    if res:
-     side,ratio,rp,r=res
-     last[sym]=time.time()
-     tipo="OTC" if "otc" in sym else "REALE"
-     icon="🔵" if side=="BUY" else "🔴"
-     send(f"📌{icon} *{sym.upper()} {tipo} {side}*\nCandele VERE Pocket ✅\nPinbar {ratio:.1f}x RSI {rp:.0f}->{r:.0f}\nEntra 5m {side}!")
-   except Exception as e:
-    print(e); continue
-  time.sleep(4)
+    time.sleep(3)
+    send_tg("✅ *V14 ONLINE*\n📌 PINBAR su 26 REALI+OTC\n🚀 SQUEEZE solo su 13 REALI\nCandele VERE Pocket")
+    while True:
+        try:
+            for pair in PAIRS_ALL:
+                if pair in sent and time.time()-sent[pair]<600: continue
+                candles=get_candles_pocket(pair, period=300, count=30)
+                if len(candles)<15: continue
+                res=check_pinbar(candles); tipo="📌 PINBAR"
+                if not res and pair in PAIRS_REAL_ONLY:
+                    res=check_squeeze(candles); tipo="🚀 SQUEEZE REALI"
+                if res:
+                    direction,detail=res; emoji="🔵" if direction=="BUY" else "🔴"
+                    send_tg(f"{tipo} {emoji} *{pair.upper()} {direction} 5m* - VERE ✅\n{detail}\n⏰ Entra 5 min {direction}")
+                    sent[pair]=time.time()
+                time.sleep(1.2)
+        except Exception as e:
+            print(f"err {e}")
+        time.sleep(30)
 
-threading.Thread(target=bot_loop,daemon=True).start()
-
+def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
 if __name__=="__main__":
- app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+    threading.Thread(target=run_flask, daemon=True).start(); bot_loop()
