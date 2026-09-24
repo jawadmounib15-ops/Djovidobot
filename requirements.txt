@@ -1,4 +1,5 @@
-Flask
-yfinance
+flask
 pandas
 requests
+websocket-client
+pocketoptionapi
