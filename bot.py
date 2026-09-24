@@ -1,83 +1,82 @@
-import os, time, requests, yfinance as yf, threading, pandas as pd
-from datetime import datetime, timedelta
+import os, time, requests, threading, yfinance as yf, pandas as pd
 from flask import Flask
-
 app = Flask(__name__)
 @app.route('/')
-def home():
-    return "V105 3 FILTRI 0% WR ONLINE"
+def home(): return "BOT PINBAR REALI BALANCED LIVE"
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT = os.environ.get("TELEGRAM_CHAT_ID")
-
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","NZDUSD=X","USDCHF=X",
-         "USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X",
-         "NZDJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X",
-         "GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","AUDNZD=X","CADCHF=X","EURNZD=X"]
-
-WIN=0; LOSS=0; PEND={}; CHECK=0
+TOKEN=os.environ.get("TELEGRAM_TOKEN")
+CHAT=os.environ.get("TELEGRAM_CHAT_ID")
+PAIRS=["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDJPY=X","USDCHF=X","AUDUSD=X","NZDUSD=X","EURGBP=X","USDCAD=X","GBPCHF=X"]
+last_signal={}
 
 def send(m):
-    try:
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
+    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
     except: pass
 
 def rsi(s,p=14):
     d=s.diff(); g=d.where(d>0,0); l=-d.where(d<0,0)
-    ag=g.ewm(alpha=1/p).mean(); al=l.ewm(alpha=1/p).mean()
-    return 100-(100/(1+ag/al))
+    return 100-(100/(1+g.ewm(alpha=1/p).mean()/l.ewm(alpha=1/p).mean()))
 
 def bot():
-    global WIN,LOSS,CHECK
-    send("💀 *V105 3 FILTRI FISSO 0% WR ONLINE*\n25 coppie | Scan 30sec\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP")
+    send("📌 *BOT PINBAR REALI BALANCED ACCESO*\n3 Regole - Non troppo stretto - 80%")
     while True:
         try:
-            now=datetime.now()
-            for k in list(PEND.keys()):
-                s,p,t = PEND[k]
-                if now-t >= timedelta(minutes=5):
-                    try:
-                        df=yf.download(k,period="1d",interval="1m",progress=False)
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-                        c=float(df["Close"].iloc[-1])
-                        w=(s=="BUY" and c>p) or (s=="SELL" and c<p)
-                        if w: WIN+=1; R="✅ WIN"
-                        else: LOSS+=1; R="❌ LOSS"
-                        tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
-                        send(f"{R} *{k.replace('=X','')} {s}* {p:.5f}->{c:.5f} WR {wr:.0f}% ({WIN}W/{LOSS}L)\n👉 Pocket fai *{'SELL' if s=='BUY' else 'BUY'}*")
-                        del PEND[k]
-                    except: pass
+            for pair in PAIRS:
+                try:
+                    df=yf.download(pair,period="2d",interval="1m",progress=False)
+                    if len(df)<210: continue
+                    if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
 
-            if time.time()-CHECK >= 30:
-                CHECK=time.time()
-                for pair in PAIRS:
-                    if pair in PEND: continue
-                    try:
-                        df=yf.download(pair,period="10d",interval="5m",progress=False)
-                        if len(df)<210: continue
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-                        df["RSI"]=rsi(df["Close"])
-                        df["MA"]=df["Close"].rolling(20).mean()
-                        df["STD"]=df["Close"].rolling(20).std()
-                        df["UP"]=df["MA"]+2*df["STD"]
-                        df["LOW"]=df["MA"]-2*df["STD"]
-                        df["EMA200"]=df["Close"].ewm(span=200).mean()
-                        c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
-                        up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
-                        ema=float(df["EMA200"].iloc[-1])
-                        sig=None
-                        toll=(up-low)*0.25
-                        if r>=63 and c>=up-toll and c<ema: sig="BUY"
-                        elif r<=37 and c<=low+toll and c>ema: sig="SELL"
-                        if sig:
-                            PEND[pair]=(sig,c,now)
-                            send(f"💀 *5M {sig} {pair.replace('=X','')} 3 FILTRI RSI:{r:.0f}*\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*")
-                    except: pass
-        except: pass
-        time.sleep(1)
+                    df["EMA200"]=df["Close"].ewm(span=200).mean()
+                    df["RSI"]=rsi(df["Close"])
+                    df["MA20"]=df["Close"].rolling(20).mean()
+                    df["STD"]=df["Close"].rolling(20).std()
+                    df["LOW"]=df["MA20"]-2.0*df["STD"]
+                    df["UP"]=df["MA20"]+2.0*df["STD"]
+
+                    c=df["Close"].iloc[-1]
+                    o=df["Open"].iloc[-1]
+                    h=df["High"].iloc[-1]
+                    l=df["Low"].iloc[-1]
+                    ema200=df["EMA200"].iloc[-1]
+                    r=df["RSI"].iloc[-1]
+                    r_prev=df["RSI"].iloc[-2]
+                    low=df["LOW"].iloc[-1]
+                    up=df["UP"].iloc[-1]
+                    nome=pair.replace("=X","")
+
+                    if nome in last_signal and time.time()-last_signal[nome] < 900: continue # 15 min
+
+                    body = abs(c-o)
+                    upper_wick = h - max(c,o)
+                    lower_wick = min(c,o) - l
+                    total_range = h-l
+                    if total_range==0 or body==0: continue
+
+                    # 3 REGOLE BILANCIATE - NON STRETTE
+                    # REGOLA 1: Forma 2.2x (non 3x) + corpo 30% (non 20%)
+                    bull_forma = lower_wick >= body*2.2 and body <= total_range*0.30 and c > o
+                    bear_forma = upper_wick >= body*2.2 and body <= total_range*0.30 and c < o
+
+                    # REGOLA 2: Location 60% coda (non 70%) + Boll 2.0 (non 2.2) + RSI 38/62 (non 32/68)
+                    bull_loc = lower_wick >= total_range*0.60 and (l <= low*1.01 or l <= ema200*1.001) and r < 38
+                    bear_loc = upper_wick >= total_range*0.60 and (h >= up*0.99 or h >= ema200*0.999) and r > 62
+
+                    # REGOLA 3: Chiusura + RSI gira
+                    bull_close = r > r_prev
+                    bear_close = r < r_prev
+
+                    if bull_forma and bull_loc and bull_close:
+                        last_signal[nome]=time.time()
+                        send(f"📌🔵 *{nome} PINBAR BUY 80%*\nForma {lower_wick/body:.1f}x ✅ Coda 60% ✅\nBoll/EMA200 + RSI {r:.0f} -> {r_prev:.0f} ✅\n5m BUY")
+
+                    if bear_forma and bear_loc and bear_close:
+                        last_signal[nome]=time.time()
+                        send(f"📌🔴 *{nome} PINBAR SELL 80%*\nForma {upper_wick/body:.1f}x ✅ Coda 60% ✅\nBoll/EMA200 + RSI {r:.0f} -> {r_prev:.0f} ✅\n5m SELL")
+
+                except: continue
+            time.sleep(60)
+        except: time.sleep(30)
 
 threading.Thread(target=bot,daemon=True).start()
-
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
+if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
