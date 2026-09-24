@@ -2,4 +2,3 @@ flask
 pandas
 requests
 websocket-client
-git+https://github.com/ChipaDevTeam/pocketoptionapi.git
