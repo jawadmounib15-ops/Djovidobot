@@ -3,23 +3,17 @@ from flask import Flask
 import websocket
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V15.8 SBLOCCATO LIVE"
+def home(): return "V15.9 FINAL LIVE"
 @app.route('/ping')
 def ping(): return "OK"
-
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 POCKET_SSID = os.getenv("POCKET_SSID")
-
-PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","EURJPY","GBPJPY","EURGBP","AUDJPY","NZDUSD","USDCHF","EURCHF","CADJPY","AUDCAD","NZDJPY","EURNZD","EURUSD_otc","GBPUSD_otc","USDJPY_otc","AUDUSD_otc","EURJPY_otc","GBPJPY_otc","AUDJPY_otc","BTCUSD_otc","ETHUSD_otc"]
-
+PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","EURJPY","GBPJPY","EURGBP","AUDJPY","NZDUSD","USDCHF","EURCHF","CADJPY","AUDCAD","NZDJPY","EURNZD"]
 sent = {}
-checked = 0
-
 def send_tg(msg):
     try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=8)
     except: pass
-
 def rsi(closes, p=14):
     if len(closes)<p+1: return 50
     gains=[]; losses=[]
@@ -29,7 +23,6 @@ def rsi(closes, p=14):
     ag=sum(gains[-p:])/p; al=sum(losses[-p:])/p
     if al==0: return 70
     return 100-(100/(1+ag/al))
-
 def get_candles(pair, period):
     candles=[]; ws=None
     try:
@@ -46,10 +39,8 @@ def get_candles(pair, period):
             try:
                 ws.send("40"); time.sleep(0.2)
                 ws.send(f'42["auth",{{"session":"{POCKET_SSID}"}}]'); time.sleep(0.3)
-                clean=pair.replace("_otc","").upper()
+                clean=pair.upper()
                 ws.send(f'42["changeSymbol",{{"asset":"{clean}","period":{period}}}]')
-                if "_otc" in pair.lower():
-                    time.sleep(0.2); ws.send(f'42["changeSymbol",{{"asset":"{clean}_otc","period":{period}}}]')
                 time.sleep(1.2); ws.close()
             except:
                 try: ws.close()
@@ -63,7 +54,6 @@ def get_candles(pair, period):
         except: pass
         gc.collect()
     return candles[-30:] if len(candles)>=10 else []
-
 def is_perfect(candles):
     if len(candles)<10: return None
     last=candles[-2]
@@ -75,14 +65,10 @@ def is_perfect(candles):
         body=abs(c-o); up=h-max(o,c); low=min(o,c)-l
         closes=[float(x.get('close',0)) if isinstance(x,dict) else float(x[2]) for x in candles[-20:]]
         r=rsi(closes)
-        # SBLOCCATO 35% invece di 40%
-        if low/total>=0.35 and body/total<=0.50 and r<=65:
-            return "BUY", f"PINBAR Coda {low/total*100:.0f}% RSI {r:.0f}"
-        if up/total>=0.35 and body/total<=0.50 and r>=35:
-            return "SELL", f"PINBAR Coda {up/total*100:.0f}% RSI {r:.0f}"
+        if low/total>=0.25 and body/total<=0.65: return "BUY", f"PINBAR {low/total*100:.0f}% RSI {r:.0f}"
+        if up/total>=0.25 and body/total<=0.65: return "SELL", f"PINBAR {up/total*100:.0f}% RSI {r:.0f}"
     except: pass
     return None
-
 def is_double_top(candles):
     try:
         if len(candles)<15: return None
@@ -97,13 +83,12 @@ def is_double_top(candles):
         if not rest: return None
         top2=max(rest, key=lambda x: x[1])
         h1=top1[1]; h2=top2[1]
-        if abs(h1-h2)/h1 > 0.008: return None # 0.8% larghissimo
+        if abs(h1-h2)/h1 > 0.015: return None
         last=candles[-2]
         close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
-        if close < h1*0.999: return f"M {h1:.5f} + {h2:.5f}"
+        if close < h1*0.999: return f"M {h1:.5f}"
     except: pass
     return None
-
 def is_double_bottom(candles):
     try:
         if len(candles)<15: return None
@@ -118,13 +103,12 @@ def is_double_bottom(candles):
         if not rest: return None
         bot2=min(rest, key=lambda x: x[1])
         l1=bot1[1]; l2=bot2[1]
-        if abs(l1-l2)/l1 > 0.008: return None
+        if abs(l1-l2)/l1 > 0.015: return None
         last=candles[-2]
         close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
-        if close > l1*1.001: return f"W {l1:.5f} + {l2:.5f}"
+        if close > l1*1.001: return f"W {l1:.5f}"
     except: pass
     return None
-
 def is_engulfing(candles):
     try:
         if len(candles)<5: return None
@@ -133,66 +117,50 @@ def is_engulfing(candles):
         else: po=float(prev[1]); pc=float(prev[2])
         if isinstance(last, dict): o=float(last.get('open',0)); c=float(last.get('close',0))
         else: o=float(last[1]); c=float(last[2])
-        if pc<po and c>o and c>po and o<pc: return "BUY", f"ENGULF BULL"
-        if pc>po and c<o and c<po and o>pc: return "SELL", f"ENGULF BEAR"
+        if pc<po and c>o and c>po and o<pc: return "BUY", f"ENGULF"
+        if pc>po and c<o and c<po and o>pc: return "SELL", f"ENGULF"
     except: pass
     return None
-
 def process(pair, period, label):
-    global checked
     try:
         key=f"{pair}_{label}"
-        if key in sent and time.time()-sent[key]<180: return
+        if key in sent and time.time()-sent[key]<60: return
         candles=get_candles(pair, period)
-        checked+=1
         if not candles: return
-        sm={"M5":"5 MINUTI","M15":"15 MINUTI","H1":"1 ORA","H4":"4 ORE"}
+        sm={"M5":"5 MIN","M15":"15 MIN","H1":"1 ORA","H4":"4 ORE"}
         scad=sm.get(label,label)
-        tf_text=f"⏰ *TIMEFRAME: {label} ({scad})*"
         res=is_perfect(candles)
         if res:
             d,det=res; e="🔵" if d=="BUY" else "🔴"
-            send_tg(f"💎 *{label} | {scad} | {e} {pair.upper()} {d}*\n{tf_text}\n📊 {det}\n🎯 Scadenza: {scad}")
+            send_tg(f"💎 *{label} | {scad} | {e} {pair.upper()} {d}*\n⏰ TIMEFRAME: {label} ({scad})\n📊 {det}")
             sent[key]=time.time(); return
         dt=is_double_top(candles)
         if dt:
-            send_tg(f"🔥 *{label} | {scad} | 🔴 {pair.upper()} SELL*\n{tf_text}\n📊 {dt}\n🎯 Scadenza: {scad}")
+            send_tg(f"🔥 *{label} | {scad} | 🔴 {pair.upper()} SELL*\n⏰ TIMEFRAME: {label} ({scad})\n📊 {dt}")
             sent[key]=time.time(); return
         db=is_double_bottom(candles)
         if db:
-            send_tg(f"🔥 *{label} | {scad} | 🔵 {pair.upper()} BUY*\n{tf_text}\n📊 {db}\n🎯 Scadenza: {scad}")
+            send_tg(f"🔥 *{label} | {scad} | 🔵 {pair.upper()} BUY*\n⏰ TIMEFRAME: {label} ({scad})\n📊 {db}")
             sent[key]=time.time(); return
         eng=is_engulfing(candles)
         if eng:
             d,det=eng; e="🔵" if d=="BUY" else "🔴"
-            send_tg(f"⚡ *{label} | {scad} | {e} {pair.upper()} {d}*\n{tf_text}\n📊 {det}\n🎯 Scadenza: {scad}")
+            send_tg(f"⚡ *{label} | {scad} | {e} {pair.upper()} {d}*\n⏰ TIMEFRAME: {label} ({scad})\n📊 {det}")
             sent[key]=time.time(); return
     except: pass
-
 def bot_loop():
-    global checked
-    send_tg("✅ *V15.8 SBLOCCATO ONLINE*\n💎 35% Pinbar | M 0.8% | W 0.8% | Engulf\n⏰ TIMEFRAME CHIARO - Ora spara segnali!")
+    send_tg("✅ *V15.9 FINAL ULTRA*\n💎 25% Pinbar | M/W 1.5% | Engulf\n⏰ TIMEFRAME CHIARO - Ora SPARA!")
     while True:
         try:
-            checked=0
             for period,label in [(300,"M5"),(900,"M15"),(3600,"H1"),(14400,"H4")]:
-                for i in range(0, len(PAIRS), 5):
-                    batch=PAIRS[i:i+5]
+                for i in range(0, len(PAIRS), 4):
+                    batch=PAIRS[i:i+4]
                     ths=[]
                     for p in batch:
                         th=threading.Thread(target=process, args=(p,period,label), daemon=True)
                         th.start(); ths.append(th)
                     for th in ths: th.join(timeout=8)
                     time.sleep(1)
-                # heartbeat ogni TF
-                if checked>0:
-                    if checked % 20 == 0:
-                        pass
-            time.sleep(10)
         except: time.sleep(10)
-        time.sleep(10)
-
-def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
-if __name__=="__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
-    bot_loop()
+        time.sleep(8)
+def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("
