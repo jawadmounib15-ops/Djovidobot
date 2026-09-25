@@ -3,7 +3,7 @@ from flask import Flask
 import websocket
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V15.4 PERFECT CON SCADENZA LIVE"
+def home(): return "V15.7 ULTRA LARGATO LIVE"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 POCKET_SSID = os.getenv("POCKET_SSID")
@@ -54,6 +54,7 @@ def get_candles(pair, period):
         except: pass
         gc.collect()
     return candles[-30:] if len(candles)>=10 else []
+
 def is_perfect(candles):
     if len(candles)<10: return None
     last=candles[-2]
@@ -65,67 +66,101 @@ def is_perfect(candles):
         body=abs(c-o); up=h-max(o,c); low=min(o,c)-l
         closes=[float(x.get('close',0)) if isinstance(x,dict) else float(x[2]) for x in candles[-20:]]
         r=rsi(closes)
-        if low/total>=0.60 and body/total<=0.25 and up/total<=0.12 and 25<=r<=45:
-            return "BUY", f"Coda {low/total*100:.0f}% Corpo {body/total*100:.0f}% RSI {r:.0f}"
-        if up/total>=0.60 and body/total<=0.25 and low/total<=0.12 and 55<=r<=75:
-            return "SELL", f"Coda {up/total*100:.0f}% Corpo {body/total*100:.0f}% RSI {r:.0f}"
+        # ULTRA LARGATO 45% invece di 50%
+        if low/total>=0.45 and body/total<=0.40 and r<=55:
+            return "BUY", f"L1 PINBAR Coda {low/total*100:.0f}% RSI {r:.0f}"
+        if up/total>=0.45 and body/total<=0.40 and r>=45:
+            return "SELL", f"L1 PINBAR Coda {up/total*100:.0f}% RSI {r:.0f}"
     except: pass
     return None
+
 def is_double_top(candles):
     try:
-        if len(candles)<20: return None
+        if len(candles)<15: return None
         highs=[]
-        for i in range(len(candles)-18, len(candles)-2):
+        for i in range(len(candles)-15, len(candles)-2):
             c=candles[i]
             h=float(c.get('high',0)) if isinstance(c,dict) else float(c[3])
             highs.append((i,h))
-        if len(highs)<5: return None
         top1=max(highs, key=lambda x: x[1])
-        rest=[x for x in highs if abs(x[0]-top1[0])>=3]
+        rest=[x for x in highs if abs(x[0]-top1[0])>=2]
         if not rest: return None
         top2=max(rest, key=lambda x: x[1])
         h1=top1[1]; h2=top2[1]
-        if abs(h1-h2)/h1 > 0.0008: return None
-        idx1=min(top1[0], top2[0]); idx2=max(top1[0], top2[0])
-        mid=[]
-        for j in range(idx1, idx2):
-            c=candles[j]
-            l=float(c.get('low',0)) if isinstance(c,dict) else float(c[4])
-            mid.append(l)
-        if not mid: return None
-        valley=min(mid)
-        if (h1-valley)/h1 < 0.001: return None
+        if abs(h1-h2)/h1 > 0.003: return None
         last=candles[-2]
         close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
-        if close < valley + (h1-valley)*0.3:
-            return f"M a {h1:.5f} e {h2:.5f} - Collo {valley:.5f} ROTTO"
+        if close < h1*0.999:
+            return f"L2 M {h1:.5f} + {h2:.5f}"
     except: pass
     return None
+
+def is_double_bottom(candles):
+    try:
+        if len(candles)<15: return None
+        lows=[]
+        for i in range(len(candles)-15, len(candles)-2):
+            c=candles[i]
+            l=float(c.get('low',0)) if isinstance(c,dict) else float(c[4])
+            lows.append((i,l))
+        bot1=min(lows, key=lambda x: x[1])
+        rest=[x for x in lows if abs(x[0]-bot1[0])>=2]
+        if not rest: return None
+        bot2=min(rest, key=lambda x: x[1])
+        l1=bot1[1]; l2=bot2[1]
+        if abs(l1-l2)/l1 > 0.003: return None
+        last=candles[-2]
+        close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
+        if close > l1*1.001:
+            return f"L3 W {l1:.5f} + {l2:.5f}"
+    except: pass
+    return None
+
+def is_engulfing(candles):
+    try:
+        if len(candles)<5: return None
+        prev=candles[-3]; last=candles[-2]
+        if isinstance(prev, dict): po=float(prev.get('open',0)); pc=float(prev.get('close',0))
+        else: po=float(prev[1]); pc=float(prev[2])
+        if isinstance(last, dict): o=float(last.get('open',0)); c=float(last.get('close',0))
+        else: o=float(last[1]); c=float(last[2])
+        if pc<po and c>o and c>po and o<pc:
+            return "BUY", f"L4 ENGULF BULL"
+        if pc>po and c<o and c<po and o>pc:
+            return "SELL", f"L4 ENGULF BEAR"
+    except: pass
+    return None
+
 def process(pair, period, label):
     try:
         key=f"{pair}_{label}"
-        if key in sent and time.time()-sent[key]<1800: return
+        if key in sent and time.time()-sent[key]<300: return # 5 MIN COOLDOWN
         candles=get_candles(pair, period)
         if not candles: return
+        sm={"M5":"5 MINUTI","M15":"15 MINUTI","H1":"1 ORA","H4":"4 ORE"}
+        scad=sm.get(label,label)
         res=is_perfect(candles)
         if res:
             d,det=res; e="🔵" if d=="BUY" else "🔴"
-            scadenza_map={"M5":"5 MINUTI","M15":"15 MINUTI","H1":"1 ORA","H4":"4 ORE"}
-            scad=scadenza_map.get(label,label)
-            send_tg(f"💎 *PERFECT {label} {e} {pair.upper()} {d}*\n{det}\n⏰ *SCADENZA: {scad}*\n📈 Entra {d} su Pocket con scadenza {scad}")
-            sent[key]=time.time()
-            return
-        # SE H1/H4 non ha trovato pinbar -> cerca DOPPIO MASSIMO come lavoro 3-4
-        if label in ["H1","H4"]:
-            dt=is_double_top(candles)
-            if dt:
-                scadenza_map={"M5":"5 MINUTI","M15":"15 MINUTI","H1":"1 ORA","H4":"4 ORE"}
-                scad=scadenza_map.get(label,label)
-                send_tg(f"🔥 *DOPPIO MASSIMO {label} 🔴 {pair.upper()} VENDI*\n{dt}\n⏰ *SCADENZA: {scad}*\n📈 Pattern a M - Entra VENDI con scadenza {scad}")
-                sent[key]=time.time()
+            send_tg(f"💎 *{label} {e} {pair.upper()} {d}*\n{det}\n⏰ {scad}")
+            sent[key]=time.time(); return
+        dt=is_double_top(candles)
+        if dt:
+            send_tg(f"🔥 *{label} 🔴 {pair.upper()} SELL*\n{dt}\n⏰ {scad}")
+            sent[key]=time.time(); return
+        db=is_double_bottom(candles)
+        if db:
+            send_tg(f"🔥 *{label} 🔵 {pair.upper()} BUY*\n{db}\n⏰ {scad}")
+            sent[key]=time.time(); return
+        eng=is_engulfing(candles)
+        if eng:
+            d,det=eng; e="🔵" if d=="BUY" else "🔴"
+            send_tg(f"⚡ *{label} {e} {pair.upper()} {d}*\n{det}\n⏰ {scad}")
+            sent[key]=time.time(); return
     except: pass
+
 def bot_loop():
-    send_tg("✅ *V15.4 PERFECT CON SCADENZA ONLINE*\n💎 30 segnali/giorno - scadenza scritta!")
+    send_tg("✅ *V15.7 ULTRA LARGATO ONLINE*\n💎 45% Pinbar | M | W | Engulfing\n⏰ Cooldown 5min - TEST SEGNALI!")
     while True:
         try:
             for period,label in [(300,"M5"),(900,"M15"),(3600,"H1"),(14400,"H4")]:
@@ -136,9 +171,10 @@ def bot_loop():
                         th=threading.Thread(target=process, args=(p,period,label), daemon=True)
                         th.start(); ths.append(th)
                     for th in ths: th.join(timeout=8)
-                    time.sleep(2)
+                    time.sleep(1)
         except: time.sleep(10)
-        time.sleep(20)
+        time.sleep(10)
+
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
 if __name__=="__main__":
     threading.Thread(target=run_flask, daemon=True).start()
