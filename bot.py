@@ -3,13 +3,13 @@ from flask import Flask
 import websocket
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V15.9 FINAL LIVE"
+def home(): return "V15.9.1 FIX LIVE"
 @app.route('/ping')
 def ping(): return "OK"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 POCKET_SSID = os.getenv("POCKET_SSID")
-PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","EURJPY","GBPJPY","EURGBP","AUDJPY","NZDUSD","USDCHF","EURCHF","CADJPY","AUDCAD","NZDJPY","EURNZD"]
+PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","EURJPY","GBPJPY","EURGBP","AUDJPY","NZDUSD","USDCHF","EURCHF"]
 sent = {}
 def send_tg(msg):
     try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=8)
@@ -33,14 +33,13 @@ def get_candles(pair, period):
                     if len(d)>1 and isinstance(d[1], dict):
                         for c in d[1].get('candles', []): candles.append(c)
                 except: pass
-        ws = websocket.WebSocketApp("wss://api-eu.po.market/socket.io/?EIO=3&transport=websocket", on_message=on_message)
+        ws=websocket.WebSocketApp("wss://api-eu.po.market/socket.io/?EIO=3&transport=websocket", on_message=on_message)
         def run():
             time.sleep(0.2)
             try:
                 ws.send("40"); time.sleep(0.2)
                 ws.send(f'42["auth",{{"session":"{POCKET_SSID}"}}]'); time.sleep(0.3)
-                clean=pair.upper()
-                ws.send(f'42["changeSymbol",{{"asset":"{clean}","period":{period}}}]')
+                ws.send(f'42["changeSymbol",{{"asset":"{pair}","period":{period}}}]')
                 time.sleep(1.2); ws.close()
             except:
                 try: ws.close()
@@ -83,10 +82,10 @@ def is_double_top(candles):
         if not rest: return None
         top2=max(rest, key=lambda x: x[1])
         h1=top1[1]; h2=top2[1]
-        if abs(h1-h2)/h1 > 0.015: return None
+        if abs(h1-h2)/h1>0.015: return None
         last=candles[-2]
         close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
-        if close < h1*0.999: return f"M {h1:.5f}"
+        if close<h1*0.999: return f"M {h1:.5f}"
     except: pass
     return None
 def is_double_bottom(candles):
@@ -103,10 +102,10 @@ def is_double_bottom(candles):
         if not rest: return None
         bot2=min(rest, key=lambda x: x[1])
         l1=bot1[1]; l2=bot2[1]
-        if abs(l1-l2)/l1 > 0.015: return None
+        if abs(l1-l2)/l1>0.015: return None
         last=candles[-2]
         close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
-        if close > l1*1.001: return f"W {l1:.5f}"
+        if close>l1*1.001: return f"W {l1:.5f}"
     except: pass
     return None
 def is_engulfing(candles):
@@ -117,8 +116,8 @@ def is_engulfing(candles):
         else: po=float(prev[1]); pc=float(prev[2])
         if isinstance(last, dict): o=float(last.get('open',0)); c=float(last.get('close',0))
         else: o=float(last[1]); c=float(last[2])
-        if pc<po and c>o and c>po and o<pc: return "BUY", f"ENGULF"
-        if pc>po and c<o and c<po and o>pc: return "SELL", f"ENGULF"
+        if pc<po and c>o and c>po and o<pc: return "BUY", "ENGULF"
+        if pc>po and c<o and c<po and o>pc: return "SELL", "ENGULF"
     except: pass
     return None
 def process(pair, period, label):
@@ -132,24 +131,24 @@ def process(pair, period, label):
         res=is_perfect(candles)
         if res:
             d,det=res; e="🔵" if d=="BUY" else "🔴"
-            send_tg(f"💎 *{label} | {scad} | {e} {pair.upper()} {d}*\n⏰ TIMEFRAME: {label} ({scad})\n📊 {det}")
+            send_tg(f"💎 *{label} | {scad} | {e} {pair} {d}*\n⏰ {label} ({scad})\n📊 {det}")
             sent[key]=time.time(); return
         dt=is_double_top(candles)
         if dt:
-            send_tg(f"🔥 *{label} | {scad} | 🔴 {pair.upper()} SELL*\n⏰ TIMEFRAME: {label} ({scad})\n📊 {dt}")
+            send_tg(f"🔥 *{label} | {scad} | 🔴 {pair} SELL*\n⏰ {label} ({scad})\n📊 {dt}")
             sent[key]=time.time(); return
         db=is_double_bottom(candles)
         if db:
-            send_tg(f"🔥 *{label} | {scad} | 🔵 {pair.upper()} BUY*\n⏰ TIMEFRAME: {label} ({scad})\n📊 {db}")
+            send_tg(f"🔥 *{label} | {scad} | 🔵 {pair} BUY*\n⏰ {label} ({scad})\n📊 {db}")
             sent[key]=time.time(); return
         eng=is_engulfing(candles)
         if eng:
             d,det=eng; e="🔵" if d=="BUY" else "🔴"
-            send_tg(f"⚡ *{label} | {scad} | {e} {pair.upper()} {d}*\n⏰ TIMEFRAME: {label} ({scad})\n📊 {det}")
+            send_tg(f"⚡ *{label} | {scad} | {e} {pair} {d}*\n⏰ {label} ({scad})\n📊 {det}")
             sent[key]=time.time(); return
     except: pass
 def bot_loop():
-    send_tg("✅ *V15.9 FINAL ULTRA*\n💎 25% Pinbar | M/W 1.5% | Engulf\n⏰ TIMEFRAME CHIARO - Ora SPARA!")
+    send_tg("✅ *V15.9.1 FIX LIVE*\n💎 25% Pinbar | M/W 1.5%")
     while True:
         try:
             for period,label in [(300,"M5"),(900,"M15"),(3600,"H1"),(14400,"H4")]:
@@ -163,4 +162,9 @@ def bot_loop():
                     time.sleep(1)
         except: time.sleep(10)
         time.sleep(8)
-def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("
+def run_flask():
+    port=int(os.getenv("PORT", "10000"))
+    app.run(host="0.0.0.0", port=port)
+if __name__=="__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    bot_loop()
