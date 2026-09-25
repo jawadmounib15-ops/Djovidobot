@@ -3,17 +3,23 @@ from flask import Flask
 import websocket
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V15.7.2 FIXED LIVE"
+def home(): return "V15.8 SBLOCCATO LIVE"
 @app.route('/ping')
 def ping(): return "OK"
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 POCKET_SSID = os.getenv("POCKET_SSID")
-PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","EURJPY","GBPJPY","EURGBP","AUDJPY","NZDUSD","USDCHF","EURCHF","CADJPY","AUDCAD","NZDJPY","EURNZD","EURUSD_otc","GBPUSD_otc","USDJPY_otc","AUDUSD_otc","EURJPY_otc","GBPJPY_otc","AUDJPY_otc","BTCUSD_otc","ETHUSD_otc","EURGBP_otc","USDCHF_otc","EURCHF_otc","GBPCHF_otc","AUDCHF_otc","CADCHF_otc"]
+
+PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","EURJPY","GBPJPY","EURGBP","AUDJPY","NZDUSD","USDCHF","EURCHF","CADJPY","AUDCAD","NZDJPY","EURNZD","EURUSD_otc","GBPUSD_otc","USDJPY_otc","AUDUSD_otc","EURJPY_otc","GBPJPY_otc","AUDJPY_otc","BTCUSD_otc","ETHUSD_otc"]
+
 sent = {}
+checked = 0
+
 def send_tg(msg):
     try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=8)
     except: pass
+
 def rsi(closes, p=14):
     if len(closes)<p+1: return 50
     gains=[]; losses=[]
@@ -23,6 +29,7 @@ def rsi(closes, p=14):
     ag=sum(gains[-p:])/p; al=sum(losses[-p:])/p
     if al==0: return 70
     return 100-(100/(1+ag/al))
+
 def get_candles(pair, period):
     candles=[]; ws=None
     try:
@@ -56,6 +63,7 @@ def get_candles(pair, period):
         except: pass
         gc.collect()
     return candles[-30:] if len(candles)>=10 else []
+
 def is_perfect(candles):
     if len(candles)<10: return None
     last=candles[-2]
@@ -67,10 +75,14 @@ def is_perfect(candles):
         body=abs(c-o); up=h-max(o,c); low=min(o,c)-l
         closes=[float(x.get('close',0)) if isinstance(x,dict) else float(x[2]) for x in candles[-20:]]
         r=rsi(closes)
-        if low/total>=0.40 and body/total<=0.45 and r<=60: return "BUY", f"L1 PINBAR Coda {low/total*100:.0f}% RSI {r:.0f}"
-        if up/total>=0.40 and body/total<=0.45 and r>=40: return "SELL", f"L1 PINBAR Coda {up/total*100:.0f}% RSI {r:.0f}"
+        # SBLOCCATO 35% invece di 40%
+        if low/total>=0.35 and body/total<=0.50 and r<=65:
+            return "BUY", f"PINBAR Coda {low/total*100:.0f}% RSI {r:.0f}"
+        if up/total>=0.35 and body/total<=0.50 and r>=35:
+            return "SELL", f"PINBAR Coda {up/total*100:.0f}% RSI {r:.0f}"
     except: pass
     return None
+
 def is_double_top(candles):
     try:
         if len(candles)<15: return None
@@ -85,12 +97,13 @@ def is_double_top(candles):
         if not rest: return None
         top2=max(rest, key=lambda x: x[1])
         h1=top1[1]; h2=top2[1]
-        if abs(h1-h2)/h1 > 0.004: return None
+        if abs(h1-h2)/h1 > 0.008: return None # 0.8% larghissimo
         last=candles[-2]
         close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
-        if close < h1*0.999: return f"L2 M {h1:.5f} + {h2:.5f}"
+        if close < h1*0.999: return f"M {h1:.5f} + {h2:.5f}"
     except: pass
     return None
+
 def is_double_bottom(candles):
     try:
         if len(candles)<15: return None
@@ -105,12 +118,13 @@ def is_double_bottom(candles):
         if not rest: return None
         bot2=min(rest, key=lambda x: x[1])
         l1=bot1[1]; l2=bot2[1]
-        if abs(l1-l2)/l1 > 0.004: return None
+        if abs(l1-l2)/l1 > 0.008: return None
         last=candles[-2]
         close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
-        if close > l1*1.001: return f"L3 W {l1:.5f} + {l2:.5f}"
+        if close > l1*1.001: return f"W {l1:.5f} + {l2:.5f}"
     except: pass
     return None
+
 def is_engulfing(candles):
     try:
         if len(candles)<5: return None
@@ -119,15 +133,18 @@ def is_engulfing(candles):
         else: po=float(prev[1]); pc=float(prev[2])
         if isinstance(last, dict): o=float(last.get('open',0)); c=float(last.get('close',0))
         else: o=float(last[1]); c=float(last[2])
-        if pc<po and c>o and c>po and o<pc: return "BUY", f"L4 ENGULF BULL"
-        if pc>po and c<o and c<po and o>pc: return "SELL", f"L4 ENGULF BEAR"
+        if pc<po and c>o and c>po and o<pc: return "BUY", f"ENGULF BULL"
+        if pc>po and c<o and c<po and o>pc: return "SELL", f"ENGULF BEAR"
     except: pass
     return None
+
 def process(pair, period, label):
+    global checked
     try:
         key=f"{pair}_{label}"
         if key in sent and time.time()-sent[key]<180: return
         candles=get_candles(pair, period)
+        checked+=1
         if not candles: return
         sm={"M5":"5 MINUTI","M15":"15 MINUTI","H1":"1 ORA","H4":"4 ORE"}
         scad=sm.get(label,label)
@@ -151,10 +168,13 @@ def process(pair, period, label):
             send_tg(f"⚡ *{label} | {scad} | {e} {pair.upper()} {d}*\n{tf_text}\n📊 {det}\n🎯 Scadenza: {scad}")
             sent[key]=time.time(); return
     except: pass
+
 def bot_loop():
-    send_tg("✅ *V15.7.2 FIXED ONLINE*\n💎 40% Pinbar | M 0.4% | W 0.4% | Engulf\n⏰ TIMEFRAME CHIARO!")
+    global checked
+    send_tg("✅ *V15.8 SBLOCCATO ONLINE*\n💎 35% Pinbar | M 0.8% | W 0.8% | Engulf\n⏰ TIMEFRAME CHIARO - Ora spara segnali!")
     while True:
         try:
+            checked=0
             for period,label in [(300,"M5"),(900,"M15"),(3600,"H1"),(14400,"H4")]:
                 for i in range(0, len(PAIRS), 5):
                     batch=PAIRS[i:i+5]
@@ -164,8 +184,14 @@ def bot_loop():
                         th.start(); ths.append(th)
                     for th in ths: th.join(timeout=8)
                     time.sleep(1)
+                # heartbeat ogni TF
+                if checked>0:
+                    if checked % 20 == 0:
+                        pass
+            time.sleep(10)
         except: time.sleep(10)
         time.sleep(10)
+
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
 if __name__=="__main__":
     threading.Thread(target=run_flask, daemon=True).start()
