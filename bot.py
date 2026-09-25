@@ -3,7 +3,7 @@ from flask import Flask
 import websocket
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V15.7.1 LARGATO POCO LIVE"
+def home(): return "V15.7.2 TIMEFRAME LIVE"
 @app.route('/ping')
 def ping(): return "OK"
 
@@ -75,7 +75,6 @@ def is_perfect(candles):
         body=abs(c-o); up=h-max(o,c); low=min(o,c)-l
         closes=[float(x.get('close',0)) if isinstance(x,dict) else float(x[2]) for x in candles[-20:]]
         r=rsi(closes)
-        # LARGATO POCO: da 45% a 40% + corpo 45% + RSI più largo
         if low/total>=0.40 and body/total<=0.45 and r<=60:
             return "BUY", f"L1 PINBAR Coda {low/total*100:.0f}% RSI {r:.0f}"
         if up/total>=0.40 and body/total<=0.45 and r>=40:
@@ -97,7 +96,7 @@ def is_double_top(candles):
         if not rest: return None
         top2=max(rest, key=lambda x: x[1])
         h1=top1[1]; h2=top2[1]
-        if abs(h1-h2)/h1 > 0.004: return None # da 0.3% a 0.4%
+        if abs(h1-h2)/h1 > 0.004: return None
         last=candles[-2]
         close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
         if close < h1*0.999:
@@ -145,33 +144,36 @@ def is_engulfing(candles):
 def process(pair, period, label):
     try:
         key=f"{pair}_{label}"
-        if key in sent and time.time()-sent[key]<180: return # 3 MIN invece di 5
+        if key in sent and time.time()-sent[key]<180: return
         candles=get_candles(pair, period)
         if not candles: return
+        # TIMEFRAME CHIARO
         sm={"M5":"5 MINUTI","M15":"15 MINUTI","H1":"1 ORA","H4":"4 ORE"}
         scad=sm.get(label,label)
+        tf_text=f"⏰ *TIMEFRAME: {label} ({scad})*"
+
         res=is_perfect(candles)
         if res:
             d,det=res; e="🔵" if d=="BUY" else "🔴"
-            send_tg(f"💎 *{label} {e} {pair.upper()} {d}*\n{det}\n⏰ {scad}")
+            send_tg(f"💎 *{label} | {scad} | {e} {pair.upper()} {d}*\n{tf_text}\n📊 {det}\n🎯 Scadenza: {scad}")
             sent[key]=time.time(); return
         dt=is_double_top(candles)
         if dt:
-            send_tg(f"🔥 *{label} 🔴 {pair.upper()} SELL*\n{dt}\n⏰ {scad}")
+            send_tg(f"🔥 *{label} | {scad} | 🔴 {pair.upper()} SELL*\n{tf_text}\n📊 {dt}\n🎯 Scadenza: {scad}")
             sent[key]=time.time(); return
         db=is_double_bottom(candles)
         if db:
-            send_tg(f"🔥 *{label} 🔵 {pair.upper()} BUY*\n{db}\n⏰ {scad}")
+            send_tg(f"🔥 *{label} | {scad} | 🔵 {pair.upper()} BUY*\n{tf_text}\n📊 {db}\n🎯 Scadenza: {scad}")
             sent[key]=time.time(); return
         eng=is_engulfing(candles)
         if eng:
             d,det=eng; e="🔵" if d=="BUY" else "🔴"
-            send_tg(f"⚡ *{label} {e} {pair.upper()} {d}*\n{det}\n⏰ {scad}")
+            send_tg(f"⚡ *{label} | {scad} | {e} {pair.upper()} {d}*\n{tf_text}\n📊 {det}\n🎯 Scadenza: {scad}")
             sent[key]=time.time(); return
     except: pass
 
 def bot_loop():
-    send_tg("✅ *V15.7.1 LARGATO POCO ONLINE*\n💎 40% Pinbar | M 0.4% | W 0.4% | Engulfing\n⏰ 3min - TEST SEGNALI!")
+    send_tg("✅ *V15.7.2 TIMEFRAME ONLINE*\n💎 40% Pinbar | M 0.4% | W 0.4% | Engulf\n⏰ TIMEFRAME CHIARO nel segnale!")
     while True:
         try:
             for period,label in [(300,"M5"),(900,"M15"),(3600,"H1"),(14400,"H4")]:
