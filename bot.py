@@ -97,7 +97,7 @@ def bot_loop():
  send_tg("✅ *V15.9 TURBO 30% ONLINE*\n💥 + SSID CHECK - Avviso se scade!")
  while True:
   try:
-   if fail_count>=15:
+   if fail_count>=40:
     send_tg(f"❌ *SSID SCADUTO!*\nIl tuo SSID {POCKET_SSID[:10]}... non prende più candele!\nVai su Pocket Option > F12 > Application > Prendi nuovo SSID!")
     fail_count=0
    for period,label in [(300,"M5"),(900,"M15"),(3600,"H1")]:
