@@ -71,6 +71,36 @@ def is_perfect(candles):
             return "SELL", f"Coda {up/total*100:.0f}% Corpo {body/total*100:.0f}% RSI {r:.0f}"
     except: pass
     return None
+def is_double_top(candles):
+    try:
+        if len(candles)<20: return None
+        highs=[]
+        for i in range(len(candles)-18, len(candles)-2):
+            c=candles[i]
+            h=float(c.get('high',0)) if isinstance(c,dict) else float(c[3])
+            highs.append((i,h))
+        if len(highs)<5: return None
+        top1=max(highs, key=lambda x: x[1])
+        rest=[x for x in highs if abs(x[0]-top1[0])>=3]
+        if not rest: return None
+        top2=max(rest, key=lambda x: x[1])
+        h1=top1[1]; h2=top2[1]
+        if abs(h1-h2)/h1 > 0.0008: return None
+        idx1=min(top1[0], top2[0]); idx2=max(top1[0], top2[0])
+        mid=[]
+        for j in range(idx1, idx2):
+            c=candles[j]
+            l=float(c.get('low',0)) if isinstance(c,dict) else float(c[4])
+            mid.append(l)
+        if not mid: return None
+        valley=min(mid)
+        if (h1-valley)/h1 < 0.001: return None
+        last=candles[-2]
+        close=float(last.get('close',0)) if isinstance(last,dict) else float(last[2])
+        if close < valley + (h1-valley)*0.3:
+            return f"M a {h1:.5f} e {h2:.5f} - Collo {valley:.5f} ROTTO"
+    except: pass
+    return None
 def process(pair, period, label):
     try:
         key=f"{pair}_{label}"
@@ -84,6 +114,15 @@ def process(pair, period, label):
             scad=scadenza_map.get(label,label)
             send_tg(f"💎 *PERFECT {label} {e} {pair.upper()} {d}*\n{det}\n⏰ *SCADENZA: {scad}*\n📈 Entra {d} su Pocket con scadenza {scad}")
             sent[key]=time.time()
+            return
+        # SE H1/H4 non ha trovato pinbar -> cerca DOPPIO MASSIMO come lavoro 3-4
+        if label in ["H1","H4"]:
+            dt=is_double_top(candles)
+            if dt:
+                scadenza_map={"M5":"5 MINUTI","M15":"15 MINUTI","H1":"1 ORA","H4":"4 ORE"}
+                scad=scadenza_map.get(label,label)
+                send_tg(f"🔥 *DOPPIO MASSIMO {label} 🔴 {pair.upper()} VENDI*\n{dt}\n⏰ *SCADENZA: {scad}*\n📈 Pattern a M - Entra VENDI con scadenza {scad}")
+                sent[key]=time.time()
     except: pass
 def bot_loop():
     send_tg("✅ *V15.4 PERFECT CON SCADENZA ONLINE*\n💎 30 segnali/giorno - scadenza scritta!")
