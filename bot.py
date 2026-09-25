@@ -1,46 +1,126 @@
-import os, time, threading, requests, json, gc, random
+import os, time, threading, requests, json, gc
 from flask import Flask
 import websocket
 app = Flask(__name__)
 @app.route('/')
-def home(): return "TEST LARGHISSIMO LIVE"
+def home(): return "V16 TURBO REAL FIX LIVE"
 @app.route('/ping')
 def ping(): return "OK"
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 POCKET_SSID = os.getenv("POCKET_SSID")
-PAIRS = ["EURUSD_otc","GBPUSD_otc","AUDUSD_otc","EURJPY_otc","BTCUSD_otc","ETHUSD_otc"]
-
+PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","EURJPY","GBPJPY","EURGBP","AUDJPY","NZDUSD","USDCHF","EURCHF","CADJPY","AUDCAD","NZDJPY","EURNZD","EURUSD_otc","GBPUSD_otc","USDJPY_otc","AUDUSD_otc","BTCUSD_otc","ETHUSD_otc","EURJPY_otc","GBPJPY_otc"]
+sent={}; fail_count=0
 def send_tg(msg):
  try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=8)
  except: pass
-
-def get_candles_mock(pair):
- # SIMULAZIONE CANDELE PER TEST - così siamo sicuri che manda
- o = 1.0 + random.random()*0.01
- c = o + random.uniform(-0.005, 0.005)
- h = max(o,c) + random.uniform(0.001, 0.008)
- l = min(o,c) - random.uniform(0.001, 0.008)
- return [{'open':o,'close':c,'high':h,'low':l} for _ in range(20)] + [{'open':o,'close':c,'high':h,'low':l}]
-
+def rsi(closes, p=14):
+ if len(closes)<p+1: return 50
+ gains=[]; losses=[]
+ for i in range(1,len(closes)):
+  d=closes[i]-closes[i-1]; gains.append(max(d,0)); losses.append(max(-d,0))
+ ag=sum(gains[-p:])/p; al=sum(losses[-p:])/p
+ if al==0: return 70
+ return 100-(100/(1+ag/al))
+def get_candles(pair, period):
+ global fail_count
+ candles=[]; ws=None
+ try:
+  def on_message(w, msg):
+   if msg.startswith('42'):
+    try:
+     d=json.loads(msg[2:])
+     if len(d)>1 and isinstance(d[1], dict):
+      data=d[1]
+      if 'candles' in data:
+       for c in data['candles']: candles.append(c)
+      if 'history' in data:
+       for c in data['history']: candles.append(c)
+    except: pass
+  # NUOVO ENDPOINT FIXATO
+  ws=websocket.WebSocketApp("wss://api-eu.po.market/socket.io/?EIO=3&transport=websocket", on_message=on_message, on_error=lambda w,e: None)
+  def run():
+   time.sleep(0.2)
+   try:
+    ws.send("40")
+    time.sleep(0.2)
+    ws.send(f'42["auth",{{"session":"{POCKET_SSID}","isDemo":1}}]')
+    time.sleep(0.5)
+    clean=pair.replace("_otc","").upper()
+    ws.send(f'42["loadHistory",{{"asset":"{clean}","period":{period}}}]')
+    time.sleep(0.3)
+    if "_otc" in pair.lower():
+     ws.send(f'42["loadHistory",{{"asset":"{clean}_otc","period":{period}}}]')
+    time.sleep(1.5)
+    ws.close()
+   except:
+    try: ws.close()
+    except: pass
+  t=threading.Thread(target=run, daemon=True); t.start()
+  ws.run_forever(ping_timeout=3, ping_interval=10)
+  t.join(timeout=3)
+ except: pass
+ finally:
+  try:
+   if ws: ws.close()
+  except: pass
+  gc.collect()
+ if len(candles)>=10:
+  fail_count=0
+  return candles[-30:]
+ else:
+  fail_count+=1
+  return []
+def is_perfect(candles):
+ if len(candles)<10: return None
+ last=candles[-2]
+ try:
+  if isinstance(last, dict): o=float(last.get('open',0)); c=float(last.get('close',0)); h=float(last.get('high',0)); l=float(last.get('low',0))
+  else: o=float(last[1]); c=float(last[2]); h=float(last[3]); l=float(last[4])
+  total=h-l
+  if total==0: return None
+  body=abs(c-o); up=h-max(o,c); low=min(o,c)-l
+  closes=[float(x.get('close',0)) if isinstance(x,dict) else float(x[2]) for x in candles[-20:]]
+  r=rsi(closes)
+  if low/total>=0.30 and body/total<=0.65 and r<=68:
+   return "BUY", f"TURBO Coda {low/total*100:.0f}% RSI {r:.0f}"
+  if up/total>=0.30 and body/total<=0.65 and r>=32:
+   return "SELL", f"TURBO Coda {up/total*100:.0f}% RSI {r:.0f}"
+ except: pass
+ return None
+def process(pair, period, label):
+ try:
+  key=f"{pair}_{label}"
+  if key in sent and time.time()-sent[key]<90: return
+  candles=get_candles(pair, period)
+  if not candles: return
+  sm={"M5":"5 MINUTI","M15":"15 MINUTI","H1":"1 ORA"}
+  scad=sm.get(label,label)
+  res=is_perfect(candles)
+  if res:
+   d,det=res; e="🔵" if d=="BUY" else "🔴"
+   send_tg(f"💎 *{label} {e} {pair.upper()} {d}*\n{det}\n⏰ {scad}")
+   sent[key]=time.time()
+ except: pass
 def bot_loop():
- send_tg("✅ *TEST LARGHISSIMO ONLINE*\n🧪 Mando segnali ogni 30sec per prova!")
- c=0
+ global fail_count
+ send_tg("✅ *V16 TURBO 30% REAL FIX ONLINE*\n💥 Candele reali Pocket fixate!")
  while True:
   try:
-   c+=1
-   pair = random.choice(PAIRS)
-   label = random.choice(["M5","M15"])
-   direction = random.choice(["BUY","SELL"])
-   emoji = "🔵" if direction=="BUY" else "🔴"
-   # SEGNALE LARGHISSIMO - qualsiasi cosa
-   send_tg(f"💎 *{label} {emoji} {pair.upper()} {direction} - TEST*\n📊 Prova segnale {c}\n⏰ 5 MINUTI\n🔥 Se vedi questo, Telegram OK!")
-   if c==3:
-    send_tg(f"✅ *CONFERMA: Telegram funziona perfetto!*\nOra ti preparo il TURBO vero che prende candele reali!")
-   time.sleep(35)
-  except:
-   time.sleep(10)
-
+   if fail_count>=40:
+    send_tg(f"❌ *SSID SCADUTO!* {POCKET_SSID[:10]}... non prende più candele! Cambialo!")
+    fail_count=0
+   for period,label in [(300,"M5"),(900,"M15"),(3600,"H1")]:
+    for i in range(0, len(PAIRS), 5):
+     batch=PAIRS[i:i+5]
+     ths=[]
+     for p in batch:
+      th=threading.Thread(target=process, args=(p,period,label), daemon=True)
+      th.start(); ths.append(th)
+     for th in ths: th.join(timeout=10)
+     time.sleep(1.2)
+  except: time.sleep(10)
+  time.sleep(5)
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
 if __name__=="__main__":
  threading.Thread(target=run_flask, daemon=True).start()
