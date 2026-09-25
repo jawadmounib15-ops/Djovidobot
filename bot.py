@@ -4,7 +4,7 @@ import websocket
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V14.3 BATCH 5 FAST LIVE"
+def home(): return "V14.3 BATCH 5 - SQUEEZE 0.0045 LIVE"
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -90,7 +90,7 @@ def check_squeeze(candles):
     up,low,ma,w=bollinger(closes)
     if up is None: return None
     r=rsi(closes)
-    if w is not None and w<0.0035:
+    if w is not None and w<0.0045: # ALLARGATO
         if closes[-1]>up and 52<=r<=68: return "BUY", f"SQUEEZE UP banda {w:.4f} RSI {r:.0f}"
         if closes[-1]<low and 32<=r<=48: return "SELL", f"SQUEEZE DOWN banda {w:.4f} RSI {r:.0f}"
     return None
@@ -112,10 +112,9 @@ def process_pair(pair):
 
 def bot_loop():
     time.sleep(2)
-    send_tg("✅ *V14.3 BATCH 5 FAST ONLINE*\n📌 26 + 🚀 13 REALI\n⚡ 5 alla volta - No lag")
+    send_tg("✅ *V14.3 BATCH 5 SQUEEZE 0.0045 ONLINE*\n📌 26 PINBAR + 🚀 13 SQUEEZE\n⚡ 5 alla volta - Più segnali!")
     while True:
         try:
-            # BATCH DA 5 - LA TUA IDEA!
             for i in range(0, len(PAIRS_ALL), 5):
                 batch = PAIRS_ALL[i:i+5]
                 threads=[]
@@ -124,8 +123,7 @@ def bot_loop():
                     th.start(); threads.append(th)
                 for th in threads: th.join(timeout=8)
                 gc.collect()
-                time.sleep(2) # pausa tra batch
-
+                time.sleep(2)
             if len(sent)>40:
                 oldest=min(sent, key=sent.get); del sent[oldest]
         except Exception as e:
