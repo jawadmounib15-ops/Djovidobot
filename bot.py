@@ -1,22 +1,18 @@
-import os, time, requests, yfinance as yf, threading, pandas as pd
+import os, time, requests, yfinance as yf, threading
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V108 40 COPPIE ANTI-429 ONLINE"
+def home(): return "V111 OTC 8% ULTRA LARGO WEEKEND ONLINE"
 @app.route('/ping')
 def ping(): return "OK"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 
-REAL = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X","GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X"]
-OTC = ["EURUSD_otc","GBPUSD_otc","USDJPY_otc","AUDUSD_otc","USDCHF_otc","USDCAD_otc","EURJPY_otc","GBPJPY_otc","EURGBP_otc","AUDJPY_otc","CADJPY_otc","CHFJPY_otc","EURCHF_otc","GBPCHF_otc","AUDCHF_otc","EURAUD_otc","GBPAUD_otc","EURCAD_otc","AUDCAD_otc","NZDCAD_otc"]
-MAP = {otc: real for otc, real in zip(OTC, REAL)}
-ALL = REAL + OTC
+OTC_LIST = ["EURUSD_otc","GBPUSD_otc","USDJPY_otc","AUDUSD_otc","USDCHF_otc","USDCAD_otc","EURJPY_otc","GBPJPY_otc","EURGBP_otc","AUDJPY_otc","CADJPY_otc","CHFJPY_otc","EURCHF_otc","GBPCHF_otc","AUDCHF_otc","EURAUD_otc","GBPAUD_otc","EURCAD_otc","AUDCAD_otc","NZDCAD_otc"]
+MAP = {"EURUSD_otc":"EURUSD=X","GBPUSD_otc":"GBPUSD=X","USDJPY_otc":"USDJPY=X","AUDUSD_otc":"AUDUSD=X","USDCHF_otc":"USDCHF=X","USDCAD_otc":"USDCAD=X","EURJPY_otc":"EURJPY=X","GBPJPY_otc":"GBPJPY=X","EURGBP_otc":"EURGBP=X","AUDJPY_otc":"AUDJPY=X","CADJPY_otc":"CADJPY=X","CHFJPY_otc":"CHFJPY=X","EURCHF_otc":"EURCHF=X","GBPCHF_otc":"GBPCHF=X","AUDCHF_otc":"AUDCHF=X","EURAUD_otc":"EURAUD=X","GBPAUD_otc":"GBPAUD=X","EURCAD_otc":"EURCAD=X","AUDCAD_otc":"AUDCAD=X","NZDCAD_otc":"NZDCAD=X"}
 
 COOLDOWN = {}
-TREND_CACHE = {}
-TREND_TIME = {}
 
 def send(m):
     try:
@@ -29,84 +25,54 @@ def pinbar(o,h,l,c):
     if rng==0: return 0,0
     return ((min(o,c)-l)/rng)*100, ((h-max(o,c))/rng)*100
 
-def get_trend_cached(yahoo_pair, tf):
-    key = f"{yahoo_pair}_{tf}"
-    # Cache 15 minuti per non bombardare Yahoo
-    if key in TREND_CACHE and time.time() - TREND_TIME.get(key,0) < 900:
-        return TREND_CACHE[key]
-    try:
-        time.sleep(1.5) # anti 429
-        df=yf.download(yahoo_pair, period="10d" if tf=="1h" else "20d", interval=tf, progress=False, auto_adjust=True)
-        if len(df)<200:
-            return TREND_CACHE.get(key, "NEUTRAL")
-        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-        ema200 = df["Close"].ewm(span=200).mean().iloc[-1]
-        c = float(df["Close"].iloc[-1])
-        trend = "BUY" if c>ema200 else "SELL"
-        TREND_CACHE[key]=trend
-        TREND_TIME[key]=time.time()
-        return trend
-    except Exception as e:
-        print(f"TREND ERR {yahoo_pair} {tf} {e}", flush=True)
-        return TREND_CACHE.get(key, "NEUTRAL")
-
 def bot():
-    send("✅ *V108 40 COPPIE ANTI-429 ONLINE*\n• 20 Reali + 20 OTC\n• Cache H1/H4 15min\n• Delay 1.5sec anti 429\n• BUY=BUY LARGO 10%")
+    send("✅ *V111 OTC 8% ULTRA LARGO WEEKEND ONLINE*\n• Solo OTC\n• Cerca nelle ultime 3 candele\n• M1 8% OR M5 8% = SEGNALE")
 
     while True:
         try:
-            for block in range(0, len(ALL), 4): # blocchi di 4 per essere più lento
-                chunk = ALL[block:block+4]
-                print(f"SCAN BLOCCO {block//4+1}/10: {chunk}", flush=True)
+            for pair_otc in OTC_LIST:
+                if pair_otc in COOLDOWN and time.time() - COOLDOWN[pair_otc] < 40:
+                    continue
+                yahoo = MAP[pair_otc]
+                display = pair_otc.replace('_otc','-OTC')
+                try:
+                    time.sleep(1)
 
-                for pair in chunk:
-                    if pair in COOLDOWN and time.time() - COOLDOWN[pair] < 60:
-                        continue
+                    df1 = yf.download(yahoo, period="2d", interval="1m", progress=False, auto_adjust=True)
+                    if len(df1)<10: continue
+                    best_b1=best_s1=0
+                    for i in range(2,5): # ultime 3 candele per weekend
+                        o,h,l,c = float(df1["Open"].iloc[-i]), float(df1["High"].iloc[-i]), float(df1["Low"].iloc[-i]), float(df1["Close"].iloc[-i])
+                        b,s = pinbar(o,h,l,c)
+                        best_b1=max(best_b1,b); best_s1=max(best_s1,s)
 
-                    yahoo_pair = MAP.get(pair, pair)
-                    display = pair.replace('=X','').replace('_otc','-OTC')
+                    df5 = yf.download(yahoo, period="5d", interval="5m", progress=False, auto_adjust=True)
+                    if len(df5)<10: continue
+                    best_b5=best_s5=0
+                    for i in range(2,5):
+                        o,h,l,c = float(df5["Open"].iloc[-i]), float(df5["High"].iloc[-i]), float(df5["Low"].iloc[-i]), float(df5["Close"].iloc[-i])
+                        b,s = pinbar(o,h,l,c)
+                        best_b5=max(best_b5,b); best_s5=max(best_s5,s)
 
-                    try:
-                        time.sleep(2) # anti 429 importante
-                        df1 = yf.download(yahoo_pair, period="2d", interval="1m", progress=False, auto_adjust=True)
-                        if len(df1)<10: continue
-                        if isinstance(df1.columns,pd.MultiIndex): df1.columns=df1.columns.get_level_values(0)
-                        o1,h1,l1,c1 = float(df1["Open"].iloc[-2]), float(df1["High"].iloc[-2]), float(df1["Low"].iloc[-2]), float(df1["Close"].iloc[-2])
-                        buy1,sell1 = pinbar(o1,h1,l1,c1)
+                    print(f"{display} M1 B{best_b1:.0f} S{best_s1:.0f} | M5 B{best_b5:.0f} S{best_s5:.0f}", flush=True)
 
-                        time.sleep(1)
-                        df5 = yf.download(yahoo_pair, period="5d", interval="5m", progress=False, auto_adjust=True)
-                        if len(df5)<10: continue
-                        if isinstance(df5.columns,pd.MultiIndex): df5.columns=df5.columns.get_level_values(0)
-                        o5,h5,l5,c5 = float(df5["Open"].iloc[-2]), float(df5["High"].iloc[-2]), float(df5["Low"].iloc[-2]), float(df5["Close"].iloc[-2])
-                        buy5,sell5 = pinbar(o5,h5,l5,c5)
+                    sig=None; p1=p5=0
+                    # ULTRA LARGO: basta M1 8% OR M5 8%
+                    if best_b1>=8 or best_b5>=8:
+                        if best_b1>=best_s1 and best_b5>=best_s5:
+                            sig="BUY"; p1=best_b1; p5=best_b5
+                    elif best_s1>=8 or best_s5>=8:
+                        if best_s1>=best_b1 and best_s5>=best_b5:
+                            sig="SELL"; p1=best_s1; p5=best_s5
 
-                        # Trend con cache
-                        trend_h1 = get_trend_cached(yahoo_pair, "1h")
-                        trend_h4 = get_trend_cached(yahoo_pair, "4h")
+                    if sig:
+                        COOLDOWN[pair_otc]=time.time()
+                        send(f"💎 *{sig} {display} 8% OTC*\nM1:{p1:.0f}% M5:{p5:.0f}%\n👉 *POCKET: {sig}*")
 
-                        print(f"{display} M1 B{buy1:.0f} S{sell1:.0f} M5 B{buy5:.0f} S{sell5:.0f} H1:{trend_h1} H4:{trend_h4}", flush=True)
-
-                        sig=None; perc=0
-                        if buy1>=10 and buy5>=5:
-                            if trend_h1=="BUY" or trend_h4=="BUY":
-                                sig="BUY"; perc=buy1
-                        elif sell1>=10 and sell5>=5:
-                            if trend_h1=="SELL" or trend_h4=="SELL":
-                                sig="SELL"; perc=sell1
-
-                        if sig:
-                            COOLDOWN[pair]=time.time()
-                            tag = "OTC" if "_otc" in pair else "REALE"
-                            send(f"💎 *M1+M5 {sig} {display} 10% {tag}*\nM1:{perc:.0f}% M5:{buy5 if sig=='BUY' else sell5:.0f}%\nH1:{trend_h1} H4:{trend_h4}\n👉 *POCKET: {sig} DIRETTO*")
-
-                    except Exception as e:
-                        print(f"ERR {pair} {e}", flush=True)
-                        time.sleep(3)
-                        continue
-
-                time.sleep(8) # 8 sec tra blocchi
-
+                except Exception as e:
+                    print(f"ERR {pair_otc} {e}", flush=True)
+                    continue
+            time.sleep(5)
         except Exception as e:
             print(f"LOOP ERR {e}", flush=True)
             time.sleep(10)
