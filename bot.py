@@ -3,8 +3,9 @@ from flask import Flask
 from datetime import datetime
 
 app = Flask(__name__)
+
 @app.route('/')
-def home(): return "V24 bot.py OK"
+def home(): return "V24 FINAL ONLINE - 20 COPPIE"
 @app.route('/ping')
 def ping(): return "OK"
 
@@ -17,15 +18,16 @@ TIMEFRAMES = {"M1":60,"M5":300}
 sent = {}
 
 def send_tg(m):
-    try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT_ID,"text":m,"parse_mode":"Markdown"}, timeout=10)
+    try:
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT_ID,"text":m,"parse_mode":"Markdown"}, timeout=10)
     except: pass
     print(m, flush=True)
 
 def get_candles(pair, period):
     try:
-        asset=pair.replace("_otc","").upper()
-        headers={"User-Agent":"Mozilla/5.0","Origin":"https://pocketoption.com","Referer":"https://pocketoption.com/","Cookie":f"session={POCKET_SSID}"}
-        r=requests.get(f"https://pocketoption.com/api/candles?asset={asset}&period={period}&count=50", headers=headers, timeout=10)
+        asset = pair.replace("_otc","").upper()
+        headers = {"User-Agent":"Mozilla/5.0","Origin":"https://pocketoption.com","Referer":"https://pocketoption.com/","Cookie":f"session={POCKET_SSID}"}
+        r = requests.get(f"https://pocketoption.com/api/candles?asset={asset}&period={period}&count=50", headers=headers, timeout=10)
         if r.status_code==200 and isinstance(r.json(), list) and len(r.json())>10:
             out=[]
             for c in r.json():
@@ -36,11 +38,11 @@ def get_candles(pair, period):
     return []
 
 def check_pair_tf(pair, tf_name, period):
-    candles=get_candles(pair, period)
+    candles = get_candles(pair, period)
     if len(candles)<20: return
-    last=candles[-2]
+    last = candles[-2]
     o=float(last.get('open',0)); c=float(last.get('close',0)); h=float(last.get('high',0)); l=float(last.get('low',0))
-    total=h-l
+    total = h-l
     if total==0: return
     body=abs(c-o); upper=h-max(o,c); lower=min(o,c)-l
     signal=None; perc=0
@@ -55,7 +57,7 @@ def check_pair_tf(pair, tf_name, period):
     sent[key]=time.time()
 
 def bot_loop():
-    send_tg("✅ *V24 ONLINE - bot.py*\n🔥 20 COPPIE - NO LAG")
+    send_tg("✅ *V24 ONLINE - bot.py FIXATO*\n🔥 20 COPPIE - TEST 10%")
     while True:
         for i in range(0, len(PAIRS), 5):
             blocco=PAIRS[i:i+5]
@@ -68,4 +70,13 @@ def bot_loop():
             time.sleep(4)
         time.sleep(8)
 
+# --- FINE FILE CORRETTO - QUESTO FIXA L'ERRORE "exited early" ---
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    print(f"Flask su porta {port}", flush=True)
+    app.run(host='0.0.0.0', port=port)
+
+# 1. Avvia bot in background
 threading.Thread(target=bot_loop, daemon=True).start()
+# 2. Avvia Flask e NON chiude più
+run_flask()
