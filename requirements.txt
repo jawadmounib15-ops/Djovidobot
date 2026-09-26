@@ -1,4 +1,4 @@
 flask
-pandas
 requests
-websocket-client
+yfinance
+pandas
