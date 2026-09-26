@@ -1,8 +1,8 @@
-import os, time, requests, yfinance as yf, threading
+import os, time, requests, yfinance as yf, threading, pandas as pd
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V111 OTC 8% ULTRA LARGO WEEKEND ONLINE"
+def home(): return "V112 OTC 8% FIX Series ONLINE"
 @app.route('/ping')
 def ping(): return "OK"
 
@@ -25,8 +25,14 @@ def pinbar(o,h,l,c):
     if rng==0: return 0,0
     return ((min(o,c)-l)/rng)*100, ((h-max(o,c))/rng)*100
 
+def fix_df(df):
+    if df.empty: return df
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df.dropna()
+
 def bot():
-    send("✅ *V111 OTC 8% ULTRA LARGO WEEKEND ONLINE*\n• Solo OTC\n• Cerca nelle ultime 3 candele\n• M1 8% OR M5 8% = SEGNALE")
+    send("✅ *V112 OTC 8% FIX Series ONLINE*\n• Fix float Series bug\n• Solo OTC 8% ultra largo")
 
     while True:
         try:
@@ -38,26 +44,32 @@ def bot():
                 try:
                     time.sleep(1)
 
-                    df1 = yf.download(yahoo, period="2d", interval="1m", progress=False, auto_adjust=True)
+                    df1 = fix_df(yf.download(yahoo, period="2d", interval="1m", progress=False, auto_adjust=True))
                     if len(df1)<10: continue
                     best_b1=best_s1=0
-                    for i in range(2,5): # ultime 3 candele per weekend
-                        o,h,l,c = float(df1["Open"].iloc[-i]), float(df1["High"].iloc[-i]), float(df1["Low"].iloc[-i]), float(df1["Close"].iloc[-i])
+                    for i in range(2,5):
+                        # FIX: usa .values per evitare Series
+                        o = float(df1["Open"].values[-i])
+                        h = float(df1["High"].values[-i])
+                        l = float(df1["Low"].values[-i])
+                        c = float(df1["Close"].values[-i])
                         b,s = pinbar(o,h,l,c)
                         best_b1=max(best_b1,b); best_s1=max(best_s1,s)
 
-                    df5 = yf.download(yahoo, period="5d", interval="5m", progress=False, auto_adjust=True)
+                    df5 = fix_df(yf.download(yahoo, period="5d", interval="5m", progress=False, auto_adjust=True))
                     if len(df5)<10: continue
                     best_b5=best_s5=0
                     for i in range(2,5):
-                        o,h,l,c = float(df5["Open"].iloc[-i]), float(df5["High"].iloc[-i]), float(df5["Low"].iloc[-i]), float(df5["Close"].iloc[-i])
+                        o = float(df5["Open"].values[-i])
+                        h = float(df5["High"].values[-i])
+                        l = float(df5["Low"].values[-i])
+                        c = float(df5["Close"].values[-i])
                         b,s = pinbar(o,h,l,c)
                         best_b5=max(best_b5,b); best_s5=max(best_s5,s)
 
                     print(f"{display} M1 B{best_b1:.0f} S{best_s1:.0f} | M5 B{best_b5:.0f} S{best_s5:.0f}", flush=True)
 
                     sig=None; p1=p5=0
-                    # ULTRA LARGO: basta M1 8% OR M5 8%
                     if best_b1>=8 or best_b5>=8:
                         if best_b1>=best_s1 and best_b5>=best_s5:
                             sig="BUY"; p1=best_b1; p5=best_b5
