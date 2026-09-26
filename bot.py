@@ -1,96 +1,72 @@
 import os, time, threading, requests
 from flask import Flask
-
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V28 POCKET LARGA - COME PRIMA"
+def home(): return "V28 YAHOO COME PRIMA"
 @app.route('/ping')
 def ping(): return "OK"
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
-PAIRS = ["EURUSD_otc","GBPUSD_otc","AUDUSD_otc","USDCAD_otc","USDCHF_otc","USDJPY_otc","EURGBP_otc","EURJPY_otc","GBPJPY_otc","AUDCAD_otc"]
-
-sent = {}
-count = 0
-
-def send_tg(m):
+def send(m):
     try:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-        data={"chat_id":TELEGRAM_CHAT_ID,"text":m,"parse_mode":"Markdown"}, timeout=10)
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"}, timeout=10)
     except: pass
     print(m, flush=True)
 
-def get_btc():
+def get_yahoo():
     try:
-        r = requests.get("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50", timeout=10)
-        if r.status_code == 200:
-            out=[]
-            for k in r.json():
-                out.append({"o":float(k[1]),"h":float(k[2]),"l":float(k[3]),"c":float(k[4])})
-            return out
+        # Yahoo BTC come prima
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?interval=1m&range=1d"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=10)
+        j = r.json()
+        result = j['chart']['result'][0]
+        o = result['indicators']['quote'][0]['open']
+        h = result['indicators']['quote'][0]['high']
+        l = result['indicators']['quote'][0]['low']
+        c = result['indicators']['quote'][0]['close']
+        candles = []
+        for i in range(len(c)):
+            if o[i] and h[i] and l[i] and c[i]:
+                candles.append({"o":float(o[i]),"h":float(h[i]),"l":float(l[i]),"c":float(c[i])})
+        print(f"Yahoo OK {len(candles)} candele", flush=True)
+        return candles[-50:]
     except Exception as e:
-        print(f"Err Binance {e}", flush=True)
-    return []
+        print(f"Yahoo err {e}", flush=True)
+        return []
 
-def bot_loop():
-    global count
-    send_tg("✅ *V28 LARGA AVVIATA*\nLeggo da Binance, segnali per Pocket\nSoglia 8% = ti arrivano sicuro")
+def loop():
+    send("✅ *V28 YAHOO COME PRIMA AVVIATA*\nLeggo da Yahoo come quando funzionava")
     while True:
         try:
-            candles = get_btc()
+            candles = get_yahoo()
             if not candles:
-                print("Niente candele Binance, riprovo", flush=True)
-                time.sleep(5)
+                print("Yahoo niente, riprovo", flush=True)
+                time.sleep(10)
                 continue
 
             last = candles[-1]
-            rng = last['h'] - last['l']
+            rng = last['h']-last['l']
             if rng == 0:
-                time.sleep(5)
-                continue
+                time.sleep(5); continue
 
-            # LARGA - 8%
-            up_wick = last['h'] - max(last['o'], last['c'])
-            down_wick = min(last['o'], last['c']) - last['l']
-            body = abs(last['o'] - last['c'])
+            buy = ((min(last['o'],last['c'])-last['l'])/rng)*100
+            sell = ((last['h']-max(last['o'],last['c']))/rng)*100
+            print(f"YAHOO BUY {buy:.1f}% SELL {sell:.1f}% BTC {last['c']:.0f}", flush=True)
 
-            # BUY se wick sotto lunga
-            perc_buy = (down_wick / rng) * 100
-            perc_sell = (up_wick / rng) * 100
-
-            print(f"BTC perc BUY {perc_buy:.1f}% SELL {perc_sell:.1f}% body {body}", flush=True)
-
-            signal = None
-            perc = 0
-            if perc_buy >= 8 and body / rng <= 0.75:
-                signal = "BUY"
-                perc = perc_buy
-            elif perc_sell >= 8 and body / rng <= 0.75:
-                signal = "SELL"
-                perc = perc_sell
-
-            if signal:
-                count += 1
-                # Mandiamo 1 segnale ogni 90 sec per non spammare, ma gira su tutte le coppie
-                for pair in PAIRS:
-                    key = f"{pair}_{signal}"
-                    if time.time() - sent.get(key, 0) > 90:
-                        msg = f"💎 *M1 {pair} {signal} {perc:.0f}%* - ENTRA SU POCKET\nBTCUSDT: {last['c']:.2f}"
-                        send_tg(msg)
-                        sent[key] = time.time()
-                        time.sleep(1)
-                        break # manda solo 1 coppia per volta per test
+            if buy >= 8:
+                send(f"💎 *M1 EURUSD_otc BUY {buy:.0f}%* - YAHOO - ENTRA POCKET")
+                time.sleep(60)
+            elif sell >= 8:
+                send(f"💎 *M1 EURUSD_otc SELL {sell:.0f}%* - YAHOO - ENTRA POCKET")
+                time.sleep(60)
 
             time.sleep(5)
         except Exception as e:
             print(f"Loop err {e}", flush=True)
             time.sleep(5)
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-threading.Thread(target=bot_loop, daemon=True).start()
-run_flask()
+threading.Thread(target=loop, daemon=True).start()
+app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
