@@ -1,64 +1,67 @@
-import time, threading, requests, yfinance as yf, pandas as pd
+import time, threading, requests, yfinance as yf, pandas as pd, os
 from flask import Flask
-import os
 
-# --- USA I TUOI NOMI GIUSTI ---
-BOT_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
+TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
+CHAT = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 
 SYMBOLS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","USDCHF=X","EURGBP=X","AUDJPY=X","EURNZD=X"]
 PAIRS_OTC = ["EUR/USD-OTC","GBP/USD-OTC","USD/JPY-OTC","AUD/USD-OTC","EUR/JPY-OTC","GBP/JPY-OTC","USD/CHF-OTC","EUR/GBP-OTC","AUD/JPY-OTC","EUR/NZD-OTC"]
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "TEST WIDE M1 OTC ONLINE"
-@app.route('/ping')
-def ping(): return "OK"
+def home(): return "TEST STRETTO M1 OTC ONLINE"
 
-def send(msg):
-    try:
-        print(f"Invio Telegram...", flush=True)
-        requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={msg}&parse_mode=Markdown", timeout=15)
-    except Exception as e:
-        print(f"Errore send: {e}", flush=True)
+def send(m):
+    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"}, timeout=10)
+    except: pass
 
-def get_m1(symbol):
-    try:
-        df = yf.download(symbol, period="1d", interval="1m", progress=False, auto_adjust=True)
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        df = df.dropna()
-        return df.tail(5)
-    except:
-        return None
-
-def check_pinbar_wide(df):
-    if df is None or len(df) < 2: return None
-    last = df.iloc[-1]
-    o, h, l, c = last['Open'], last['High'], last['Low'], last['Close']
-    body = abs(c - o)
-    if body == 0: body = 0.00001
-    upper = h - max(o,c)
-    lower = min(o,c) - l
-    total = h - l
-    if total == 0: return None
-    if upper > total*0.4 or lower > total*0.4:
-        direction = "CALL 📈" if c > o else "PUT 📉"
-        return direction
-    return None
+def fix_df(df):
+    if df.empty: return df
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    return df.dropna()
 
 def loop():
-    time.sleep(2)
-    send("🧪 *TEST WIDE M1 OTC ONLINE*\nSolo 1m + Solo OTC + Segnali larghissimi\nPython 3.11.11")
+    send("🔒 *TEST STRETTO M1 OTC ONLINE*\nFiltri: wick >65% + body <25%\nSolo segnali forti")
     while True:
         for sym, pair in zip(SYMBOLS, PAIRS_OTC):
-            df = get_m1(sym)
-            sig = check_pinbar_wide(df)
-            if sig:
-                send(f"🧪 *TEST {pair} - M1*\n{sig}\nPrezzo: {df.iloc[-1]['Close']:.5f}")
-            time.sleep(1.5)
-        time.sleep(10)
+            try:
+                df = fix_df(yf.download(sym, period="1d", interval="1m", progress=False, auto_adjust=True))
+                if len(df) < 30: 
+                    time.sleep(1.5)
+                    continue
+                
+                # Ultima candela chiusa
+                o = float(df["Open"].values[-2])
+                h = float(df["High"].values[-2])
+                l = float(df["Low"].values[-2])
+                c = float(df["Close"].values[-2])
+                
+                rng = h - l
+                if rng == 0: 
+                    time.sleep(1.5)
+                    continue
+                
+                body = abs(c - o)
+                body_perc = (body / rng) * 100
+                upper = ((h - max(o,c)) / rng) * 100
+                lower = ((min(o,c) - l) / rng) * 100
+
+                # --- FILTRO STRETTO ---
+                # Body piccolo <25% + stoppino lungo >65%
+                sig = None
+                if lower >= 65 and body_perc <= 25 and c > o:
+                    sig = f"📌 *BUY STRETTO {pair} M1*\nWick basso: {lower:.0f}% | Body: {body_perc:.0f}%"
+                elif upper >= 65 and body_perc <= 25 and c < o:
+                    sig = f"📌 *SELL STRETTO {pair} M1*\nWick alto: {upper:.0f}% | Body: {body_perc:.0f}%"
+
+                if sig:
+                    send(sig + "\n👉 *POCKET OTC*")
+                
+                time.sleep(1.5) # anti-429
+            except:
+                time.sleep(1.5)
+                continue
+        time.sleep(5)
 
 threading.Thread(target=loop, daemon=True).start()
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
