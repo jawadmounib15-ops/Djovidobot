@@ -2,7 +2,7 @@ import os, time, requests, yfinance as yf, threading, pandas as pd
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V139 STRINGI 15%"
+def home(): return "V141 ULTRA STRETTO 35%"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN") or os.environ.get("BOT_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("CHAT_ID")
@@ -11,13 +11,16 @@ SYMBOLS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","US
 PAIRS = ["EUR/USD-OTC","GBP/USD-OTC","USD/JPY-OTC","AUD/USD-OTC","EUR/JPY-OTC","GBP/JPY-OTC","USD/CHF-OTC","EUR/GBP-OTC","AUD/JPY-OTC","EUR/NZD-OTC","GBP/CHF-OTC","EUR/CAD-OTC","AUD/CAD-OTC","CHF/JPY-OTC","NZD/USD-OTC"]
 
 COOLDOWN = {}
+LAST_PAIR = {} # 1 segnale ogni 5 min per coppia
 def send(m):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
     except: pass
-def ok(pair, lavoro, sec=90): # 90 sec per meno spam
+def ok(pair, lavoro, sec=300): # 5 MINUTI cooldown
     k=f"{pair}_{lavoro}"
+    if pair in LAST_PAIR and time.time()-LAST_PAIR[pair] < 300: return False # 1 ogni 5 min max per coppia
     if k in COOLDOWN and time.time()-COOLDOWN[k] < sec: return False
     COOLDOWN[k]=time.time()
+    LAST_PAIR[pair]=time.time()
     return True
 def wick(o,h,l,c):
     rng=h-l
@@ -26,11 +29,11 @@ def wick(o,h,l,c):
 
 def bot():
     time.sleep(2)
-    send("✅ *V139 STRINGI MEDIO 15% ONLINE*\nMeno spam - solo pinbar forti!")
+    send("🔒 *V141 ULTRA STRETTO 35% ONLINE*\nSolo wick 35%+ e 1 segnale ogni 5 min per coppia - ZERO SPAM!")
     while True:
         for yahoo, pair in zip(SYMBOLS, PAIRS):
             try:
-                time.sleep(1.1)
+                time.sleep(1.2)
                 df1 = yf.download(yahoo, period="5d", interval="1m", progress=False, auto_adjust=True)
                 if df1.empty: continue
                 if isinstance(df1.columns, pd.MultiIndex): df1.columns = df1.columns.get_level_values(0)
@@ -48,53 +51,38 @@ def bot():
 
                 wb1,ws1,bd1=wick(o1,h1,l1,c1); wb5,ws5,bd5=wick(o5,h5,l5,c5); wb1h,ws1h,bd1h=wick(o1h,h1h,l1h,c1h); wb4h,ws4h,bd4h=wick(o4h,h4h,l4h,c4h)
 
-                # === STRINGI DA 2% A 15-20% ===
+                # ULTRA STRETTO 35-45%
 
-                if wb1>=30 and bd1<30 and c1>o1 and ok(pair,"L1",120):
-                    send(f"🔨 *L1 (M1) BUY {pair}*\n⏰ TF: M1 | Wick:{wb1:.0f}% | {c1:.5f}\n👉 POCKET M1")
-                if ws1>=30 and bd1<30 and c1<o1 and ok(pair,"L2",120):
-                    send(f"💫 *L2 (M1) SELL {pair}*\n⏰ TF: M1 | Wick:{ws1:.0f}% | {c1:.5f}\n👉 POCKET M1")
+                if wb1>=45 and bd1<25 and c1>o1 and ok(pair,"L1",300):
+                    send(f"🔨 *L1 (M1) BUY {pair}*\n⏰ TF: M1 | Wick:{wb1:.0f}%\n⏳ *SCADENZA: 2 MIN* | {c1:.5f}")
+                    continue
+                if ws1>=45 and bd1<25 and c1<o1 and ok(pair,"L2",300):
+                    send(f"💫 *L2 (M1) SELL {pair}*\n⏰ TF: M1 | Wick:{ws1:.0f}%\n⏳ *SCADENZA: 2 MIN* | {c1:.5f}")
+                    continue
 
-                if c1>o1 and cp<op and c1>op and bd1<50 and ok(pair,"L3",90):
-                    send(f"🔄 *L3 (M1) ENGULF BUY {pair}*\n⏰ TF: M1 | {c1:.5f}\n👉 POCKET M1")
-                if c1<o1 and cp>op and c1<op and bd1<50 and ok(pair,"L4",90):
-                    send(f"🔄 *L4 (M1) ENGULF SELL {pair}*\n⏰ TF: M1 | {c1:.5f}\n👉 POCKET M1")
+                if wb5>=35 and bd5<30 and c5>o5 and ok(pair,"L9",300):
+                    send(f"📌 *L9 (M5) BUY {pair}*\n⏰ TF: M5 | Wick:{wb5:.0f}%\n⏳ *SCADENZA: 5 MIN* | {c1:.5f}")
+                    continue
+                if ws5>=35 and bd5<30 and c5<o5 and ok(pair,"L10",300):
+                    send(f"📌 *L10 (M5) SELL {pair}*\n⏰ TF: M5 | Wick:{ws5:.0f}%\n⏳ *SCADENZA: 5 MIN* | {c1:.5f}")
+                    continue
 
-                if c1>o1 and cp>op and wb1>=10 and ok(pair,"L5",90):
-                    send(f"📈 *L5 (M1) 2x BUY {pair}*\n⏰ TF: M1 | {c1:.5f}\n👉 POCKET M1")
-                if c1<o1 and cp<op and ws1>=10 and ok(pair,"L6",90):
-                    send(f"📉 *L6 (M1) 2x SELL {pair}*\n⏰ TF: M1 | {c1:.5f}\n👉 POCKET M1")
+                if wb1h>=35 and bd1h<30 and c1h>o1h and ok(pair,"L13",400):
+                    send(f"🕐 *L13 (1H) BUY {pair}*\n⏰ TF: 1H | Wick:{wb1h:.0f}%\n⏳ *SCADENZA: 15 MIN* | {c1:.5f}")
+                    continue
+                if ws1h>=35 and bd1h<30 and c1h<o1h and ok(pair,"L14",400):
+                    send(f"🕐 *L14 (1H) SELL {pair}*\n⏰ TF: 1H | Wick:{ws1h:.0f}%\n⏳ *SCADENZA: 15 MIN* | {c1:.5f}")
+                    continue
 
-                if wb1>=22 and bd1<40 and c1>o1 and ok(pair,"L7",90):
-                    send(f"⚡ *L7 (M1) PIN BUY {pair}*\n⏰ TF: M1 | Wick:{wb1:.0f}% | {c1:.5f}\n👉 POCKET M1")
-                if ws1>=22 and bd1<40 and c1<o1 and ok(pair,"L8",90):
-                    send(f"⚡ *L8 (M1) PIN SELL {pair}*\n⏰ TF: M1 | Wick:{ws1:.0f}% | {c1:.5f}\n👉 POCKET M1")
-
-                # M5 STRINGI 2% -> 18%
-                if wb5>=18 and bd5<40 and c5>o5 and ok(pair,"L9",120):
-                    send(f"📌 *L9 (M5) BUY {pair}*\n⏰ TF: M5 | Wick M5:{wb5:.0f}% | {c1:.5f}\n👉 POCKET M5")
-                if ws5>=18 and bd5<40 and c5<o5 and ok(pair,"L10",120):
-                    send(f"📌 *L10 (M5) SELL {pair}*\n⏰ TF: M5 | Wick M5:{ws5:.0f}% | {c1:.5f}\n👉 POCKET M5")
-
-                if wb1>=15 and bd1<45 and c1>o1 and ok(pair,"L11",90):
-                    send(f"💡 *L11 (M1) LEGGERO BUY {pair}*\n⏰ TF: M1 | Wick:{wb1:.0f}% | {c1:.5f}\n👉 POCKET M1")
-                if ws1>=15 and bd1<45 and c1<o1 and ok(pair,"L12",90):
-                    send(f"💡 *L12 (M1) LEGGERO SELL {pair}*\n⏰ TF: M1 | Wick:{ws1:.0f}% | {c1:.5f}\n👉 POCKET M1")
-
-                # 1H STRINGI 2% -> 20%
-                if wb1h>=20 and bd1h<40 and c1h>o1h and ok(pair,"L13", 180):
-                    send(f"🕐 *L13 (1H) BUY {pair}*\n⏰ TF: 1H | Wick 1H:{wb1h:.0f}% | {c1:.5f}\n👉 POCKET 1H")
-                if ws1h>=20 and bd1h<40 and c1h<o1h and ok(pair,"L14", 180):
-                    send(f"🕐 *L14 (1H) SELL {pair}*\n⏰ TF: 1H | Wick 1H:{ws1h:.0f}% | {c1:.5f}\n👉 POCKET 1H")
-
-                # 4H STRINGI 2% -> 20%
-                if wb4h>=20 and bd4h<40 and c4h>o4h and ok(pair,"L15", 240):
-                    send(f"🏛️ *L15 (4H) BUY {pair}*\n⏰ TF: 4H | Wick 4H:{wb4h:.0f}% | {c1:.5f}\n👉 POCKET 4H")
-                if ws4h>=20 and bd4h<40 and c4h<o4h and ok(pair,"L15S", 240):
-                    send(f"🏛️ *L15 (4H) SELL {pair}*\n⏰ TF: 4H | Wick 4H:{ws4h:.0f}% | {c1:.5f}\n👉 POCKET 4H")
+                if wb4h>=35 and bd4h<35 and c4h>o4h and ok(pair,"L15",500):
+                    send(f"🏛️ *L15 (4H) BUY {pair}*\n⏰ TF: 4H | Wick:{wb4h:.0f}%\n⏳ *SCADENZA: 1 ORA* | {c1:.5f}")
+                    continue
+                if ws4h>=35 and bd4h<35 and c4h<o4h and ok(pair,"L15S",500):
+                    send(f"🏛️ *L15 (4H) SELL {pair}*\n⏰ TF: 4H | Wick:{ws4h:.0f}%\n⏳ *SCADENZA: 1 ORA* | {c1:.5f}")
+                    continue
 
             except: continue
-        time.sleep(4)
+        time.sleep(5)
 
 threading.Thread(target=bot, daemon=True).start()
 app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
