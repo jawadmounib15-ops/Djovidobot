@@ -2,7 +2,7 @@ import os, time, requests, yfinance as yf, threading, pandas as pd, datetime, co
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V123 ANTI-LAG 10 LAVORI ONLINE"
+def home(): return "V124 MEDIO-STRETTO ONLINE"
 @app.route('/ping')
 def ping(): return "OK"
 
@@ -49,7 +49,6 @@ def process_pair(pair, MAP_ACTIVE, MODE):
     try:
         yahoo=MAP_ACTIVE[pair]
         display=pair if "otc" not in pair else pair.replace('_otc','-OTC')
-        # ANTI-LAG: 1 download solo M1, poi ricavo M5 M15
         df1=fix_df(yf.download(yahoo, period="2d", interval="1m", progress=False, auto_adjust=True))
         if len(df1)<30: return
         df5=df1.resample('5min').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna()
@@ -60,7 +59,7 @@ def process_pair(pair, MAP_ACTIVE, MODE):
         c1_price=float(df1["Close"].values[-2])
         if LAST_PRICE.get(pair)==f"{c1_price:.5f}": return
         LAST_PRICE[pair]=f"{c1_price:.5f}"
-        if pair in COOLDOWN and time.time()-COOLDOWN[pair]<600: return
+        if pair in COOLDOWN and time.time()-COOLDOWN[pair]<180: return
         trend_h1=get_h1_cached(yahoo)
         o1=float(df1["Open"].values[-2]); h1=float(df1["High"].values[-2]); l1=float(df1["Low"].values[-2]); c1=float(df1["Close"].values[-2])
         o5=float(df5["Open"].values[-2]); h5=float(df5["High"].values[-2]); l5=float(df5["Low"].values[-2]); c5=float(df5["Close"].values[-2])
@@ -68,17 +67,17 @@ def process_pair(pair, MAP_ACTIVE, MODE):
         buy1,sell1,body1=pinbar(o1,h1,l1,c1); buy5,sell5,body5=pinbar(o5,h5,l5,c5); buy15,sell15,body15=pinbar(o15,h15,l15,c15)
         signal_found=None
 
-        # 1-2 PINBAR V119
-        if buy1>=15 and buy5>=15 and body1<25 and body5<25 and c1>o1 and c5>o5 and trend_h1=="BULL":
+        # 1-2 PINBAR MEDIO 10% body<30%
+        if buy1>=10 and buy5>=10 and body1<30 and body5<30 and c1>o1 and c5>o5 and trend_h1=="BULL":
             signal_found=f"📌 *PINBAR BUY {display}* M1:{buy1:.0f}% M5:{buy5:.0f}% [{MODE}]"
-        elif sell1>=15 and sell5>=15 and body1<25 and body5<25 and c1<o1 and c5<o5 and trend_h1=="BEAR":
+        elif sell1>=10 and sell5>=10 and body1<30 and body5<30 and c1<o1 and c5<o5 and trend_h1=="BEAR":
             signal_found=f"📌 *PINBAR SELL {display}* M1:{sell1:.0f}% M5:{sell5:.0f}% [{MODE}]"
-        # 3-4 ENGULFING
+        # 3-4 ENGULFING MEDIO body<40%
         if not signal_found:
             try:
                 o5p=float(df5["Open"].values[-3]); c5p=float(df5["Close"].values[-3])
-                if c5>o5 and c5p<o5p and c5>o5p and o5<c5p and body5<30 and trend_h1=="BULL": signal_found=f"🔥 *ENGULF BUY {display}* [{MODE}]"
-                elif c5<o5 and c5p>o5p and c5<o5p and o5>c5p and body5<30 and trend_h1=="BEAR": signal_found=f"🔥 *ENGULF SELL {display}* [{MODE}]"
+                if c5>o5 and c5p<o5p and c5>o5p and o5<c5p and body5<40 and trend_h1=="BULL": signal_found=f"🔥 *ENGULF BUY {display}* [{MODE}]"
+                elif c5<o5 and c5p>o5p and c5<o5p and o5>c5p and body5<40 and trend_h1=="BEAR": signal_found=f"🔥 *ENGULF SELL {display}* [{MODE}]"
             except: pass
         # 5-6 INSIDE BAR
         if not signal_found:
@@ -87,24 +86,24 @@ def process_pair(pair, MAP_ACTIVE, MODE):
                 if h5<h5p and l5>l5p and c5>o5 and trend_h1=="BULL": signal_found=f"📦 *INSIDE BUY {display}* [{MODE}]"
                 elif h5<h5p and l5>l5p and c5<o5 and trend_h1=="BEAR": signal_found=f"📦 *INSIDE SELL {display}* [{MODE}]"
             except: pass
-        # 7 M15 TRIPLA FILTRO BUONO
+        # 7 M15 TRIPLA MEDIO 20%+10%+10% body<25%
         if not signal_found:
-            if buy15>=30 and buy5>=15 and buy1>=15 and body15<20 and c15>o15 and c5>o5 and c1>o1 and trend_h1=="BULL":
+            if buy15>=20 and buy5>=10 and buy1>=10 and body15<25 and c15>o15 and c5>o5 and c1>o1 and trend_h1=="BULL":
                 signal_found=f"⏰ *M15 BUY {display}* M15:{buy15:.0f}% M5:{buy5:.0f}% M1:{buy1:.0f}% [{MODE}]"
-            elif sell15>=30 and sell5>=15 and sell1>=15 and body15<20 and c15<o15 and c5<o5 and c1<o1 and trend_h1=="BEAR":
+            elif sell15>=20 and sell5>=10 and sell1>=10 and body15<25 and c15<o15 and c5<o5 and c1<o1 and trend_h1=="BEAR":
                 signal_found=f"⏰ *M15 SELL {display}* M15:{sell15:.0f}% M5:{sell5:.0f}% M1:{sell1:.0f}% [{MODE}]"
-        # 8 MOMENTUM
+        # 8 MOMENTUM MEDIO body>50%
         if not signal_found:
-            if body1>60 and body5>60 and c1>o1 and c5>o5 and trend_h1=="BULL": signal_found=f"🚀 *MOM BUY {display}* [{MODE}]"
-            elif body1>60 and body5>60 and c1<o1 and c5<o5 and trend_h1=="BEAR": signal_found=f"🚀 *MOM SELL {display}* [{MODE}]"
-        # 9 M1 STRETTA 50%+ NUOVO
+            if body1>50 and body5>50 and c1>o1 and c5>o5 and trend_h1=="BULL": signal_found=f"🚀 *MOM BUY {display}* [{MODE}]"
+            elif body1>50 and body5>50 and c1<o1 and c5<o5 and trend_h1=="BEAR": signal_found=f"🚀 *MOM SELL {display}* [{MODE}]"
+        # 9 M1 MEDIO 30% body<25%
         if not signal_found:
-            if buy1>=50 and body1<15 and c1>o1 and trend_h1=="BULL": signal_found=f"⚡ *M1 BUY {display}* {buy1:.0f}% B{body1:.0f}% [{MODE}]"
-            elif sell1>=50 and body1<15 and c1<o1 and trend_h1=="BEAR": signal_found=f"⚡ *M1 SELL {display}* {sell1:.0f}% B{body1:.0f}% [{MODE}]"
-        # 10 M5 MEDIA 40%+ NUOVO
+            if buy1>=30 and body1<25 and c1>o1 and trend_h1=="BULL": signal_found=f"⚡ *M1 BUY {display}* {buy1:.0f}% B{body1:.0f}% [{MODE}]"
+            elif sell1>=30 and body1<25 and c1<o1 and trend_h1=="BEAR": signal_found=f"⚡ *M1 SELL {display}* {sell1:.0f}% B{body1:.0f}% [{MODE}]"
+        # 10 M5 MEDIO 25% body<30%
         if not signal_found:
-            if buy5>=40 and body5<20 and c5>o5 and c1>o1 and trend_h1=="BULL": signal_found=f"📊 *M5 BUY {display}* M5:{buy5:.0f}% M1:{buy1:.0f}% [{MODE}]"
-            elif sell5>=40 and body5<20 and c5<o5 and c1<o1 and trend_h1=="BEAR": signal_found=f"📊 *M5 SELL {display}* M5:{sell5:.0f}% M1:{sell1:.0f}% [{MODE}]"
+            if buy5>=25 and body5<30 and c5>o5 and c1>o1 and trend_h1=="BULL": signal_found=f"📊 *M5 BUY {display}* M5:{buy5:.0f}% M1:{buy1:.0f}% [{MODE}]"
+            elif sell5>=25 and body5<30 and c5<o5 and c1<o1 and trend_h1=="BEAR": signal_found=f"📊 *M5 SELL {display}* M5:{sell5:.0f}% M1:{sell1:.0f}% [{MODE}]"
 
         if signal_found:
             key=f"{pair}_{m15_time}_{signal_found[:30]}"
@@ -117,7 +116,7 @@ def bot():
     while True:
         try:
             ACTIVE_LIST, MAP_ACTIVE, MODE = get_active_market()
-            send(f"✅ *V123 ANTI-LAG ONLINE {MODE}*\n10 lavori - 1 download - 5x parallelo")
+            send(f"✅ *V124 MEDIO-STRETTO ONLINE {MODE}*\n10 lavori - 3min cooldown")
             while True:
                 ACTIVE_LIST, MAP_ACTIVE, MODE = get_active_market()
                 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
