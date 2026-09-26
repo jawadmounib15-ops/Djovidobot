@@ -1,89 +1,102 @@
 import os, time, requests, yfinance as yf, threading, pandas as pd
-from datetime import datetime, timedelta
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V105 POCKET 4 FILTRI OTTIMIZZATO CONTRARIO ONLINE"
+def home(): return "V107 40 COPPIE REALI+OTC LARGHE 10% ONLINE"
 @app.route('/ping')
 def ping(): return "OK"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X","GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","CADCHF=X"]
+# 20 REALI + 20 OTC - pinbar cerca su tutte
+REAL = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X","GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X"]
+OTC = ["EURUSD_otc","GBPUSD_otc","USDJPY_otc","AUDUSD_otc","USDCHF_otc","USDCAD_otc","EURJPY_otc","GBPJPY_otc","EURGBP_otc","AUDJPY_otc","CADJPY_otc","CHFJPY_otc","EURCHF_otc","GBPCHF_otc","AUDCHF_otc","EURAUD_otc","GBPAUD_otc","EURCAD_otc","AUDCAD_otc","NZDCAD_otc"]
 
-WIN=0; LOSS=0; PEND={}; CHECK=0
+# Mappa OTC -> dato reale Yahoo
+MAP = {otc: real for otc, real in zip(OTC, REAL)}
+ALL = REAL + OTC
+
+COOLDOWN = {}
 
 def send(m):
     try:
         requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
         print(m, flush=True)
-    except Exception as e:
-        print(f"SEND ERR {e}", flush=True)
+    except: pass
 
-def rsi(s,p=14):
-    d=s.diff(); g=d.where(d>0,0); l=-d.where(d<0,0)
-    ag=g.ewm(alpha=1/p).mean(); al=l.ewm(alpha=1/p).mean()
-    return 100-(100/(1+ag/al))
+def pinbar(o,h,l,c):
+    rng=h-l
+    if rng==0: return 0,0
+    return ((min(o,c)-l)/rng)*100, ((h-max(o,c))/rng)*100
+
+def get_trend(yahoo_pair, tf):
+    try:
+        df=yf.download(yahoo_pair, period="10d" if tf=="1h" else "20d", interval=tf, progress=False, auto_adjust=True)
+        if len(df)<200: return "NEUTRAL"
+        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+        ema200 = df["Close"].ewm(span=200).mean().iloc[-1]
+        c = float(df["Close"].iloc[-1])
+        return "BUY" if c>ema200 else "SELL"
+    except: return "NEUTRAL"
 
 def bot():
-    global WIN,LOSS,CHECK
-    send("💀 *V105 POCKET 4 FILTRI OTTIMIZZATO CONTRARIO ONLINE*\nNo SSID | 21 coppie | Scan 60sec\nFiltri: RSI 65/35 + BB 0.8 + EMA 0.05% + EMA200\n👉 CONTRARIO ATTIVO")
+    send("✅ *V107 40 COPPIE REALI+OTC LARGHE 10% ONLINE*\n• 20 Reali + 20 OTC = 40 coppie\n• Pinbar cerca su TUTTE\n• M1 10% + M5 5% LARGO\n• H1 OR H4\n• BUY=BUY DIRETTO")
+
     while True:
         try:
-            now=datetime.now()
-            for k in list(PEND.keys()):
-                s,p,t = PEND[k]
-                if now-t >= timedelta(minutes=5):
-                    try:
-                        df=yf.download(k,period="1d",interval="1m",progress=False, auto_adjust=True)
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-                        c=float(df["Close"].iloc[-1])
-                        w=(s=="BUY" and c>p) or (s=="SELL" and c<p)
-                        if w: WIN+=1; R="✅ WIN"
-                        else: LOSS+=1; R="❌ LOSS"
-                        tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
-                        send(f"{R} *{k.replace('=X','')} {s}* {p:.5f}->{c:.5f} WR {wr:.0f}% ({WIN}W/{LOSS}L)")
-                        del PEND[k]
-                    except: pass
+            for block in range(0, len(ALL), 5):
+                chunk = ALL[block:block+5]
+                print(f"SCAN BLOCCO {block//8+1}/8: {chunk}", flush=True)
 
-            if time.time()-CHECK >= 60:
-                CHECK=time.time()
-                print(f"SCAN 21 coppie {now.strftime('%H:%M:%S')}", flush=True)
-                for pair in PAIRS:
-                    if pair in PEND: continue
+                for pair in chunk:
+                    if pair in COOLDOWN and time.time() - COOLDOWN[pair] < 60:
+                        continue
+
+                    # Se è OTC prende dato reale Yahoo
+                    yahoo_pair = MAP.get(pair, pair)
+                    is_otc = "_otc" in pair
+                    display = pair.replace('=X','').replace('_otc','-OTC')
+
                     try:
-                        df=yf.download(pair,period="10d",interval="5m",progress=False, auto_adjust=True)
-                        if len(df)<210: continue
-                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-                        df["RSI"]=rsi(df["Close"])
-                        df["MA"]=df["Close"].rolling(20).mean()
-                        df["STD"]=df["Close"].rolling(20).std()
-                        df["UP"]=df["MA"]+0.8*df["STD"]
-                        df["LOW"]=df["MA"]-0.8*df["STD"]
-                        df["EMA50"]=df["Close"].ewm(span=50).mean()
-                        df["EMA200"]=df["Close"].ewm(span=200).mean()
-                        c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
-                        up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
-                        ema50=float(df["EMA50"].iloc[-1]); ema200=float(df["EMA200"].iloc[-1])
-                        ema_dist = abs(c-ema50)/ema50
-                        if ema_dist < 0.0005: continue
-                        near_up = abs(c-up)/up <= 0.01
-                        near_low = abs(c-low)/low <= 0.01
-                        sig=None
-                        if r>=65 and near_up and c>ema50 and c>ema200: sig="BUY"
-                        elif r<=35 and near_low and c<ema50 and c<ema200: sig="SELL"
+                        df1 = yf.download(yahoo_pair, period="2d", interval="1m", progress=False, auto_adjust=True)
+                        if len(df1)<10: continue
+                        if isinstance(df1.columns,pd.MultiIndex): df1.columns=df1.columns.get_level_values(0)
+                        o1,h1,l1,c1 = float(df1["Open"].iloc[-2]), float(df1["High"].iloc[-2]), float(df1["Low"].iloc[-2]), float(df1["Close"].iloc[-2])
+                        buy1,sell1 = pinbar(o1,h1,l1,c1)
+
+                        df5 = yf.download(yahoo_pair, period="5d", interval="5m", progress=False, auto_adjust=True)
+                        if len(df5)<10: continue
+                        if isinstance(df5.columns,pd.MultiIndex): df5.columns=df5.columns.get_level_values(0)
+                        o5,h5,l5,c5 = float(df5["Open"].iloc[-2]), float(df5["High"].iloc[-2]), float(df5["Low"].iloc[-2]), float(df5["Close"].iloc[-2])
+                        buy5,sell5 = pinbar(o5,h5,l5,c5)
+
+                        trend_h1 = get_trend(yahoo_pair, "1h")
+                        trend_h4 = get_trend(yahoo_pair, "4h")
+
+                        sig=None; perc=0
+                        if buy1>=10 and buy5>=5:
+                            if trend_h1=="BUY" or trend_h4=="BUY":
+                                sig="BUY"; perc=buy1
+                        elif sell1>=10 and sell5>=5:
+                            if trend_h1=="SELL" or trend_h4=="SELL":
+                                sig="SELL"; perc=sell1
+
                         if sig:
-                            PEND[pair]=(sig,c,now)
-                            pocket = "SELL" if sig=="BUY" else "BUY"
-                            send(f"💀 *5M {sig} {pair.replace('=X','')} 4 FILTRI*\nRSI:{r:.0f} BB0.8 EMA:{ema_dist*100:.3f}%\n📊 Tecnico: *{sig}* 👉 *POCKET: {pocket} CONTRARIO*")
+                            COOLDOWN[pair]=time.time()
+                            tag = "OTC" if is_otc else "REALE"
+                            send(f"💎 *M1+M5 {sig} {display} 10% {tag}*\nM1:{perc:.0f}% M5:{buy5 if sig=='BUY' else sell5:.0f}%\nH1:{trend_h1} H4:{trend_h4}\n👉 *POCKET: {sig} DIRETTO*")
+
                     except Exception as e:
                         print(f"ERR {pair} {e}", flush=True)
                         continue
+
+                time.sleep(5)
+
+            time.sleep(3)
         except Exception as e:
             print(f"LOOP ERR {e}", flush=True)
             time.sleep(10)
-        time.sleep(1)
 
 threading.Thread(target=bot, daemon=True).start()
 app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
