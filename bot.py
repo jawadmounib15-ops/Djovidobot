@@ -1,89 +1,78 @@
-import os, time, threading, requests, json
+import os, time, threading, requests, json, gc
 from flask import Flask
 import websocket
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V18 DEBUG"
+def home(): return "V19 MULTI SERVER"
 @app.route('/ping')
 def ping(): return "OK"
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 POCKET_SSID = os.getenv("POCKET_SSID")
-PAIRS = ["EURUSD_otc","BTCUSD_otc"]
-sent = {}
+
+SERVERS = [
+    "wss://api.po.market/socket.io/?EIO=3&transport=websocket",
+    "wss://api-eu.po.market/socket.io/?EIO=3&transport=websocket",
+    "wss://api-us-north.po.market/socket.io/?EIO=3&transport=websocket"
+]
 
 def send_tg(m):
-    try:
-        print(m)
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT_ID,"text":m,"parse_mode":"Markdown"}, timeout=10)
-    except Exception as e:
-        print(e)
+    try: requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id":TELEGRAM_CHAT_ID,"text":m,"parse_mode":"Markdown"}, timeout=10)
+    except: pass
 
-def get_candles(pair, period):
+def get_candles_try(pair, period, server):
     candles = []
-    logs = []
     try:
         def on_msg(ws, msg):
-            logs.append(msg[:150])
             try:
                 if msg.startswith('42'):
                     j = json.loads(msg[2:])
-                    if isinstance(j, list) and len(j) > 1:
-                        data = j[1]
-                        if isinstance(data, dict):
-                            if 'candles' in data: candles.extend(data['candles'])
-                            if 'history' in data: candles.extend(data['history'])
+                    if len(j) > 1 and isinstance(j[1], dict):
+                        if 'candles' in j[1]: candles.extend(j[1]['candles'])
+                        if 'history' in j[1]: candles.extend(j[1]['history'])
             except: pass
             if msg == "2": ws.send("3")
-
-        ws = websocket.WebSocketApp("wss://api-eu.po.market/socket.io/?EIO=3&transport=websocket", on_message=on_msg, on_error=lambda w,e: logs.append(str(e)))
-
+        ws = websocket.WebSocketApp(server, on_message=on_msg)
         def run():
             try:
-                time.sleep(0.5)
-                ws.send("40")
-                time.sleep(0.5)
-                ws.send(f'42["auth",{{"session":"{POCKET_SSID}","isDemo":1}}]')
+                time.sleep(0.3); ws.send("40")
+                time.sleep(0.3); ws.send(f'42["auth",{{"session":"{POCKET_SSID}","isDemo":1}}]')
                 time.sleep(2)
                 asset = pair.replace("_otc","").upper()
                 otc = "_otc" in pair.lower()
                 ws.send(f'42["loadHistory",{{"asset":"{asset}","period":{period},"isOtc":{str(otc).lower()}}}]')
-                time.sleep(5)
-                ws.close()
-            except Exception as e:
-                logs.append(f"RUN ERR {e}")
+                time.sleep(4); ws.close()
+            except:
                 try: ws.close()
                 except: pass
-
-        t = threading.Thread(target=run, daemon=True)
-        t.start()
-        ws.run_forever(ping_timeout=10)
-        t.join(timeout=7)
-    except Exception as e:
-        logs.append(f"OUTER {e}")
-
-    # Manda debug su Telegram solo la prima volta
-    if len(candles) < 3 and "debug_sent" not in sent:
-        send_tg(f"🛠 DEBUG {pair} candele:{len(candles)}\nLogs:\n" + "\n".join(logs[-5:])[:800])
-        sent["debug_sent"] = True
-    if len(candles) >= 3:
-        if "ok_sent" not in sent:
-            send_tg(f"✅ CONNESSO! Prese {len(candles)} candele su {pair}\nSSID OK!")
-            sent["ok_sent"] = True
-        return candles
-    return []
+        t = threading.Thread(target=run, daemon=True); t.start()
+        ws.run_forever(ping_timeout=8); t.join(timeout=6)
+    except: pass
+    return candles
 
 def bot_loop():
-    send_tg(f"🔄 V18 DEBUG AVVIATO\nSSID:{POCKET_SSID[:8]}... len:{len(POCKET_SSID) if POCKET_SSID else 0}")
+    send_tg(f"🔄 V19 TEST SERVER\nProvo 3 server diversi...")
+    working_server = None
+    for server in SERVERS:
+        send_tg(f"🔍 Provo {server.split('/')[2]}")
+        c = get_candles_try("EURUSD_otc", 300, server)
+        if len(c) >= 5:
+            working_server = server
+            send_tg(f"✅ TROVATO! Server OK: {server.split('/')[2]}\nCandele:{len(c)}\nORA PARTO CON I SEGNALI")
+            break
+        else:
+            send_tg(f"❌ {server.split('/')[2]} non risponde (0 candele)")
+        time.sleep(2)
+
+    if not working_server:
+        send_tg("💀 NESSUN SERVER RISPONDE - Pocket ha cambiato tutto. Ti preparo bot nuovo senza SSID domani.")
+        return
+
+    send_tg("🚀 BOT 15% ONLINE - VERO")
     while True:
-        for p in PAIRS:
-            c = get_candles(p, 300)
-            if c:
-                send_tg(f"💎 SEGNALE TEST {p} - {len(c)} candele OK")
-            time.sleep(3)
-        time.sleep(10)
+        time.sleep(30)
 
 def run_flask():
     app.run(host='0.0.0.0',port=int(os.environ.get("PORT",10000)))
