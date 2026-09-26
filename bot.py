@@ -4,7 +4,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V22 AUTO POCKET - 15% - FINAL"
+def home(): return "V22 LARGO 10% - TEST"
 @app.route('/ping')
 def ping(): return "OK"
 
@@ -23,17 +23,14 @@ def send_tg(m):
         print(e)
 
 def get_pocket_candles_auto(pair, period=300):
-    # METODO 1: API web di Pocket (non bloccata)
     try:
         asset = pair.replace("_otc","").upper()
-        # Endpoint che usa il sito ufficiale
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0",
             "Origin": "https://pocketoption.com",
             "Referer": "https://pocketoption.com/",
             "Cookie": f"session={POCKET_SSID}"
         }
-        # Proviamo l'API history del sito
         url = f"https://pocketoption.com/api/candles?asset={asset}&period={period}&count=50"
         r = requests.get(url, headers=headers, timeout=15)
         if r.status_code == 200:
@@ -50,7 +47,6 @@ def get_pocket_candles_auto(pair, period=300):
     except Exception as e:
         print(f"API WEB FAIL {e}")
 
-    # METODO 2: Fallback Binance (sempre funzionante)
     try:
         bin_map = {"EURUSD_otc":"EURUSDT","GBPUSD_otc":"GBPUSDT","EURJPY_otc":"EURJPY","GBPJPY_otc":"GBPJPY","AUDCAD_otc":"AUDCAD","EURGBP_otc":"EURGBP"}
         sym = bin_map.get(pair, "EURUSDT")
@@ -76,25 +72,26 @@ def check_15_percent(pair):
     body = abs(c-o); upper = h-max(o,c); lower = min(o,c)-l
 
     signal = None
-    if lower/total >= 0.15 and body/total <= 0.70:
+    # LARGO 10%
+    if lower/total >= 0.10 and body/total <= 0.80:
         signal = "BUY"
         perc = lower/total*100
-    elif upper/total >= 0.15 and body/total <= 0.70:
+    elif upper/total >= 0.10 and body/total <= 0.80:
         signal = "SELL"
         perc = upper/total*100
     else:
         return
 
     key = f"{pair}_M5_{signal}"
-    if key in sent and time.time() - sent[key] < 240:
+    if key in sent and time.time() - sent[key] < 120:
         return
 
     emoji = "🟢" if signal == "BUY" else "🔴"
-    send_tg(f"💎 *M5 {emoji} {pair} {signal}*\n⚡ TURBO {perc:.0f}% Body {body/total*100:.0f}%\n📊 Auto da Pocket\n⏰ {datetime.now().strftime('%H:%M:%S')}")
+    send_tg(f"💎 *M5 {emoji} {pair} {signal}*\n⚡ TURBO {perc:.0f}% Body {body/total*100:.0f}% [LARGO 10%]\n📊 Auto OTC\n⏰ {datetime.now().strftime('%H:%M:%S')}")
     sent[key] = time.time()
 
 def bot_loop():
-    send_tg("✅ *V22 FINAL ONLINE*\n🔥 Legge candele auto da Pocket\n💥 Strategia 15% attiva - Basta prove")
+    send_tg("✅ *V22 LARGO 10% ONLINE*\n🔥 Test con soglia più larga\n💥 Aspetta 5-10 min per primo segnale")
     while True:
         for p in PAIRS:
             try: check_15_percent(p)
