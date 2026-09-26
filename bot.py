@@ -7,9 +7,11 @@ CHAT = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 SYMBOLS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","USDCHF=X","EURGBP=X","AUDJPY=X","EURNZD=X"]
 PAIRS_OTC = ["EUR/USD-OTC","GBP/USD-OTC","USD/JPY-OTC","AUD/USD-OTC","EUR/JPY-OTC","GBP/JPY-OTC","USD/CHF-OTC","EUR/GBP-OTC","AUD/JPY-OTC","EUR/NZD-OTC"]
 
+LAST_PRICE, COOLDOWN = {}, {}
+
 app = Flask(__name__)
 @app.route('/')
-def home(): return "TEST STRETTO M1 OTC ONLINE"
+def home(): return "TEST MEDIO-STRETTO M1 ONLINE"
 
 def send(m):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"}, timeout=10)
@@ -21,47 +23,38 @@ def fix_df(df):
     return df.dropna()
 
 def loop():
-    send("🔒 *TEST STRETTO M1 OTC ONLINE*\nFiltri: wick >65% + body <25%\nSolo segnali forti")
+    send("⚖️ *TEST MEDIO-STRETTO M1 OTC ONLINE*\nFiltri: wick >50% + body <35% = 5-8 segnali/ora")
     while True:
         for sym, pair in zip(SYMBOLS, PAIRS_OTC):
             try:
+                if pair in COOLDOWN and time.time() - COOLDOWN[pair] < 120: continue
                 df = fix_df(yf.download(sym, period="1d", interval="1m", progress=False, auto_adjust=True))
-                if len(df) < 30: 
-                    time.sleep(1.5)
-                    continue
-                
-                # Ultima candela chiusa
-                o = float(df["Open"].values[-2])
-                h = float(df["High"].values[-2])
-                l = float(df["Low"].values[-2])
-                c = float(df["Close"].values[-2])
-                
-                rng = h - l
-                if rng == 0: 
-                    time.sleep(1.5)
-                    continue
-                
-                body = abs(c - o)
-                body_perc = (body / rng) * 100
-                upper = ((h - max(o,c)) / rng) * 100
-                lower = ((min(o,c) - l) / rng) * 100
+                if len(df) < 5: time.sleep(1.5); continue
 
-                # --- FILTRO STRETTO ---
-                # Body piccolo <25% + stoppino lungo >65%
-                sig = None
-                if lower >= 65 and body_perc <= 25 and c > o:
-                    sig = f"📌 *BUY STRETTO {pair} M1*\nWick basso: {lower:.0f}% | Body: {body_perc:.0f}%"
-                elif upper >= 65 and body_perc <= 25 and c < o:
-                    sig = f"📌 *SELL STRETTO {pair} M1*\nWick alto: {upper:.0f}% | Body: {body_perc:.0f}%"
+                key = f"{float(df['Close'].values[-2]):.5f}"
+                if LAST_PRICE.get(pair) == key: time.sleep(1.5); continue
+                LAST_PRICE[pair] = key
+
+                o=float(df["Open"].values[-2]); h=float(df["High"].values[-2]); l=float(df["Low"].values[-2]); c=float(df["Close"].values[-2])
+                rng=h-l
+                if rng==0: time.sleep(1.5); continue
+                body=(abs(c-o)/rng)*100
+                upper=((h-max(o,c))/rng)*100
+                lower=((min(o,c)-l)/rng)*100
+
+                sig=None
+                # MEDIO-STRETTO: 50% wick + 35% body
+                if lower>=50 and body<=35 and c>o:
+                    sig=f"📌 *BUY {pair} M1*\nWick {lower:.0f}% Body {body:.0f}%"
+                elif upper>=50 and body<=35 and c<o:
+                    sig=f"📌 *SELL {pair} M1*\nWick {upper:.0f}% Body {body:.0f}%"
 
                 if sig:
-                    send(sig + "\n👉 *POCKET OTC*")
-                
-                time.sleep(1.5) # anti-429
-            except:
+                    COOLDOWN[pair]=time.time()
+                    send(sig+f"\nPrezzo: {c:.5f}\n👉 *POCKET OTC*")
                 time.sleep(1.5)
-                continue
+            except: time.sleep(1.5); continue
         time.sleep(5)
 
 threading.Thread(target=loop, daemon=True).start()
-app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
+app.run(host='0.0.0.0', port=int(os.environ.get("PO RT",10000)))
