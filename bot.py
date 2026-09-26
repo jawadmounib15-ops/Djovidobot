@@ -1,100 +1,89 @@
-import os, time, threading, requests, random
+import os, time, requests, yfinance as yf, threading, pandas as pd
+from datetime import datetime, timedelta
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V21 FIX DEFINITIVO"
+def home(): return "V105 POCKET 4 FILTRI OTTIMIZZATO CONTRARIO ONLINE"
 @app.route('/ping')
 def ping(): return "OK"
 
-TOKEN=os.getenv("TELEGRAM_TOKEN")
-CHAT=os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 
-PAIRS = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","EURJPY","GBPJPY","EURAUD","AUDCAD","EURUSD_otc","GBPUSD_otc","USDJPY_otc","AUDUSD_otc","USDCAD_otc","USDCHF_otc","EURJPY_otc","GBPJPY_otc","EURAUD_otc","AUDCAD_otc"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X","GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","CADCHF=X"]
+
+WIN=0; LOSS=0; PEND={}; CHECK=0
 
 def send(m):
     try:
-        print(f"SEND TELEGRAM: {m}", flush=True)
-        r=requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"}, timeout=10)
-        print(f"Telegram response: {r.status_code} {r.text[:200]}", flush=True)
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
+        print(m, flush=True)
     except Exception as e:
-        print(f"TELEGRAM ERR {e}", flush=True)
+        print(f"SEND ERR {e}", flush=True)
 
-def get_candles():
-    # 1. YAHOO
-    try:
-        print("Provo Yahoo...", flush=True)
-        url="https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?interval=1m&range=1d"
-        r=requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
-        if r.status_code==200:
-            d=r.json()['chart']['result'][0]['indicators']['quote'][0]
-            o,h,l,c=d['open'],d['high'],d['low'],d['close']
-            candles=[{"o":float(o[i]),"h":float(h[i]),"l":float(l[i]),"c":float(c[i])} for i in range(len(c)) if o[i] and h[i] and l[i] and c[i]]
-            if len(candles)>10:
-                print(f"Yahoo OK {len(candles)}", flush=True)
-                return candles
-    except Exception as e:
-        print(f"Yahoo fail {e}", flush=True)
+def rsi(s,p=14):
+    d=s.diff(); g=d.where(d>0,0); l=-d.where(d<0,0)
+    ag=g.ewm(alpha=1/p).mean(); al=l.ewm(alpha=1/p).mean()
+    return 100-(100/(1+ag/al))
 
-    # 2. BINANCE VISION - questo su Render funziona sempre
-    try:
-        print("Provo Binance Vision...", flush=True)
-        url="https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=50"
-        r=requests.get(url, timeout=10)
-        if r.status_code==200:
-            candles=[{"o":float(k[1]),"h":float(k[2]),"l":float(k[3]),"c":float(k[4])} for k in r.json()]
-            print(f"Binance Vision OK {len(candles)}", flush=True)
-            return candles
-    except Exception as e:
-        print(f"Binance Vision fail {e}", flush=True)
-
-    # 3. BYBIT
-    try:
-        print("Provo Bybit...", flush=True)
-        url="https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=1&limit=50"
-        r=requests.get(url, timeout=10)
-        data=r.json()['result']['list']
-        candles=[{"o":float(k[1]),"h":float(k[2]),"l":float(k[3]),"c":float(k[4])} for k in data]
-        print(f"Bybit OK {len(candles)}", flush=True)
-        return candles
-    except Exception as e:
-        print(f"Bybit fail {e}", flush=True)
-
-    return []
-
-def loop():
-    send("✅ *V21 TEST* - Se leggi questo, Telegram funziona!\nOra cerco candele...")
-    time.sleep(5)
-    idx=0
+def bot():
+    global WIN,LOSS,CHECK
+    send("💀 *V105 POCKET 4 FILTRI OTTIMIZZATO CONTRARIO ONLINE*\nNo SSID | 21 coppie | Scan 60sec\nFiltri: RSI 65/35 + BB 0.8 + EMA 0.05% + EMA200\n👉 CONTRARIO ATTIVO")
     while True:
-        candles=get_candles()
-        if not candles:
-            print("Nessuna candela da nessuna parte, riprovo 10s", flush=True)
+        try:
+            now=datetime.now()
+            for k in list(PEND.keys()):
+                s,p,t = PEND[k]
+                if now-t >= timedelta(minutes=5):
+                    try:
+                        df=yf.download(k,period="1d",interval="1m",progress=False, auto_adjust=True)
+                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+                        c=float(df["Close"].iloc[-1])
+                        w=(s=="BUY" and c>p) or (s=="SELL" and c<p)
+                        if w: WIN+=1; R="✅ WIN"
+                        else: LOSS+=1; R="❌ LOSS"
+                        tot=WIN+LOSS; wr=WIN/tot*100 if tot>0 else 0
+                        send(f"{R} *{k.replace('=X','')} {s}* {p:.5f}->{c:.5f} WR {wr:.0f}% ({WIN}W/{LOSS}L)")
+                        del PEND[k]
+                    except: pass
+
+            if time.time()-CHECK >= 60:
+                CHECK=time.time()
+                print(f"SCAN 21 coppie {now.strftime('%H:%M:%S')}", flush=True)
+                for pair in PAIRS:
+                    if pair in PEND: continue
+                    try:
+                        df=yf.download(pair,period="10d",interval="5m",progress=False, auto_adjust=True)
+                        if len(df)<210: continue
+                        if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+                        df["RSI"]=rsi(df["Close"])
+                        df["MA"]=df["Close"].rolling(20).mean()
+                        df["STD"]=df["Close"].rolling(20).std()
+                        df["UP"]=df["MA"]+0.8*df["STD"]
+                        df["LOW"]=df["MA"]-0.8*df["STD"]
+                        df["EMA50"]=df["Close"].ewm(span=50).mean()
+                        df["EMA200"]=df["Close"].ewm(span=200).mean()
+                        c=float(df["Close"].iloc[-1]); r=float(df["RSI"].iloc[-1])
+                        up=float(df["UP"].iloc[-1]); low=float(df["LOW"].iloc[-1])
+                        ema50=float(df["EMA50"].iloc[-1]); ema200=float(df["EMA200"].iloc[-1])
+                        ema_dist = abs(c-ema50)/ema50
+                        if ema_dist < 0.0005: continue
+                        near_up = abs(c-up)/up <= 0.01
+                        near_low = abs(c-low)/low <= 0.01
+                        sig=None
+                        if r>=65 and near_up and c>ema50 and c>ema200: sig="BUY"
+                        elif r<=35 and near_low and c<ema50 and c<ema200: sig="SELL"
+                        if sig:
+                            PEND[pair]=(sig,c,now)
+                            pocket = "SELL" if sig=="BUY" else "BUY"
+                            send(f"💀 *5M {sig} {pair.replace('=X','')} 4 FILTRI*\nRSI:{r:.0f} BB0.8 EMA:{ema_dist*100:.3f}%\n📊 Tecnico: *{sig}* 👉 *POCKET: {pocket} CONTRARIO*")
+                    except Exception as e:
+                        print(f"ERR {pair} {e}", flush=True)
+                        continue
+        except Exception as e:
+            print(f"LOOP ERR {e}", flush=True)
             time.sleep(10)
-            continue
+        time.sleep(1)
 
-        last=candles[-1]
-        rng=last['h']-last['l']
-        if rng==0:
-            print("Range 0", flush=True)
-            time.sleep(5)
-            continue
-
-        buy=((min(last['o'],last['c'])-last['l'])/rng)*100
-        sell=((last['h']-max(last['o'],last['c']))/rng)*100
-        pair=PAIRS[idx % len(PAIRS)]
-        idx+=1
-
-        print(f"==> {pair} BUY {buy:.1f}% SELL {sell:.1f}% BTC {last['c']:.2f}", flush=True)
-
-        # Soglia bassa 3% per farti arrivare per forza qualcosa subito
-        if buy>=3:
-            send(f"💎 *M1 {pair} BUY {buy:.0f}%* - TEST")
-            time.sleep(30)
-        elif sell>=3:
-            send(f"💎 *M1 {pair} SELL {sell:.0f}%* - TEST")
-            time.sleep(30)
-
-        time.sleep(5)
-
-threading.Thread(target=loop, daemon=True).start()
+threading.Thread(target=bot, daemon=True).start()
 app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
