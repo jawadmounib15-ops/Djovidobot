@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V200 PINBAR + L15 FALLBACK"
+def home(): return "V200 NO 2H - PIU SEGNALI"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
@@ -12,7 +12,7 @@ SYMBOLS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","US
 PAIRS_REAL = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","EUR/JPY","GBP/JPY","USD/CHF","EUR/GBP","AUD/JPY","CHF/JPY","EUR/CAD","EUR/NZD"]
 PAIRS_OTC = ["EUR/USD-OTC","GBP/USD-OTC","USD/JPY-OTC","AUD/USD-OTC","EUR/JPY-OTC","GBP/JPY-OTC","USD/CHF-OTC","EUR/GBP-OTC","AUD/JPY-OTC","CHF/JPY-OTC","EUR/CAD-OTC","EUR/NZD-OTC"]
 
-LAST={}; CHECK=0; LAST_PINBAR=0
+LAST={}; CHECK=0
 
 def is_otc():
     now = datetime.utcnow()
@@ -28,26 +28,25 @@ def rsi(s,p=14):
     return 100-(100/(1+ag/al))
 
 def bot():
-    global CHECK, LAST_PINBAR
-    send("🎯 *V200 PINBAR + L15 FALLBACK ONLINE*\n1. Cerca PINBAR 80%\n2. Se 2h senza → L15 TREND 70%")
+    global CHECK
+    send("🎯 *V200 NO 2H ONLINE*\nPiù segnali - Pinbar + L15 subito")
     while True:
         try:
             now=datetime.now()
             otc = is_otc()
             MERCATO = "OTC" if otc else "REALI"
             LABELS = PAIRS_OTC if otc else PAIRS_REAL
-
-            if time.time()-CHECK >= 30:
+            if time.time()-CHECK >= 20: # 20 sec
                 CHECK=time.time()
                 for yahoo,label in zip(SYMBOLS,LABELS):
-                    if yahoo in LAST and time.time()-LAST[yahoo]<3600: continue
+                    if yahoo in LAST and time.time()-LAST[yahoo]<1800: continue # 30 min
                     try:
                         df=yf.download(yahoo,period="10d",interval="5m",progress=False)
                         if len(df)<100: continue
                         if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
                         df["RSI"]=rsi(df["Close"]); df["EMA20"]=df["Close"].ewm(span=20).mean(); df["EMA50"]=df["Close"].ewm(span=50).mean(); df["EMA200"]=df["Close"].ewm(span=200).mean()
                         df["RANGE"]=df["High"]-df["Low"]; df["AVG"]=df["RANGE"].rolling(20).mean()
-                        df5=df; df15=df.resample('15min').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna()
+                        df15=df.resample('15min').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna()
                         df15["RSI"]=rsi(df15["Close"]); df15["EMA20"]=df15["Close"].ewm(span=20).mean(); df15["EMA50"]=df15["Close"].ewm(span=50).mean()
 
                         o=float(df["Open"].iloc[-2]); h=float(df["High"].iloc[-2]); l=float(df["Low"].iloc[-2]); c=float(df["Close"].iloc[-2])
@@ -65,40 +64,35 @@ def bot():
 
                         cur=now.strftime("%H:%M:%S"); exp5=(now+timedelta(minutes=5)).strftime("%H:%M:%S"); exp15=(now+timedelta(minutes=15)).strftime("%H:%M:%S")
 
-                        # ===== 1. PINBAR CORRETTA 80% =====
+                        # 1. PINBAR CORRETTA 80%
                         f1=body_pct<=34; f2=lw>=66; f3=(lw/100*total)>=body*4 if body>0 else False; f4=body_pct>=2; f5=rng>=avg*0.9
                         f_buy_pin = f1 and f2 and f3 and f4 and f5 and ema20>ema50 and c>ema200 and 28<=r<=45 and l<=ema20*1.0005 and wl==lw
                         f_sell_pin = f1 and f2 and f3 and f4 and f5 and ema20<ema50 and c<ema200 and 55<=r<=72 and h>=ema20*0.9995 and wh==lw
 
                         if f_buy_pin:
-                            LAST[yahoo]=time.time(); LAST_PINBAR=time.time()
-                            send(f"🎯 *PINBAR CORRETTA BUY {label} 80%*\n📊 Body {body_pct:.1f}% Wick {wl:.1f}% 4x✅\nRSI {r:.0f} Trend UP✅ EMA20 {ema20:.5f}\n⏰ {cur}→{exp5} (5 MIN) {MERCATO}\n💰 {c:.5f} 👉 *BUY*")
+                            LAST[yahoo]=time.time()
+                            send(f"🎯 *PINBAR CORRETTA BUY {label} 80%*\n📊 Body {body_pct:.1f}% Wick {wl:.1f}% 4x✅\nRSI {r:.0f} UP✅\n⏰ {cur}→{exp5} {MERCATO} {c:.5f} 👉 BUY")
                             continue
                         if f_sell_pin:
-                            LAST[yahoo]=time.time(); LAST_PINBAR=time.time()
-                            send(f"🎯 *PINBAR CORRETTA SELL {label} 80%*\n📊 Body {body_pct:.1f}% Wick {wh:.1f}% 4x✅\nRSI {r:.0f} Trend DOWN✅ EMA20 {ema20:.5f}\n⏰ {cur}→{exp5} (5 MIN) {MERCATO}\n💰 {c:.5f} 👉 *SELL*")
+                            LAST[yahoo]=time.time()
+                            send(f"🎯 *PINBAR CORRETTA SELL {label} 80%*\n📊 Body {body_pct:.1f}% Wick {wh:.1f}% 4x✅\nRSI {r:.0f} DOWN✅\n⏰ {cur}→{exp5} {MERCATO} {c:.5f} 👉 SELL")
                             continue
 
-                        # ===== 2. FALLBACK L15 SE 2 ORE SENZA PINBAR =====
-                        no_pinbar_2h = time.time() - LAST_PINBAR > 7200
-                        if no_pinbar_2h:
-                            # L15 TREND 15MIN
-                            if c>e20_15 and e20_15>e50_15 and 50<=r15<=68:
-                                LAST[yahoo]=time.time()
-                                send(f"📈 *L15 (15MIN) BUY {label} FALLBACK 70%*\nPinbar non trovata 2h → uso trend\nRSI15 {r15:.0f} EMA20>{e50_15:.5f}✅\n⏰ {cur}→{exp15} {MERCATO}\n💰 {c:.5f} 👉 *BUY*")
-                            elif c<e20_15 and e20_15<e50_15 and 32<=r15<=50:
-                                LAST[yahoo]=time.time()
-                                send(f"📈 *L15 (15MIN) SELL {label} FALLBACK 70%*\nPinbar non trovata 2h → uso trend\nRSI15 {r15:.0f} EMA20<{e50_15:.5f}✅\n⏰ {cur}→{exp15} {MERCATO}\n💰 {c:.5f} 👉 *SELL*")
-                            # ENGULFING 5MIN
-                            elif c2<o2 and c>o and c>o2 and r<48:
-                                LAST[yahoo]=time.time()
-                                send(f"🔥 *ENGULFING BUY {label} FALLBACK 68%*\nPinbar non trovata → engulfing\n⏰ {cur}→{exp5} {MERCATO} {c:.5f} 👉 BUY")
-                            elif c2>o2 and c<o and c<o2 and r>52:
-                                LAST[yahoo]=time.time()
-                                send(f"🔥 *ENGULFING SELL {label} FALLBACK 68%*\nPinbar non trovata → engulfing\n⏰ {cur}→{exp5} {MERCATO} {c:.5f} 👉 SELL")
+                        # 2. L15 + ENGULFING SUBITO - SENZA 2 ORE
+                        if c>e20_15 and e20_15>e50_15 and 50<=r15<=68 and c>ema200:
+                            LAST[yahoo]=time.time()
+                            send(f"📈 *L15 BUY {label} 70%*\nRSI15 {r15:.0f} Trend UP✅\n⏰ {cur}→{exp15} {MERCATO} {c:.5f} 👉 BUY")
+                        elif c<e20_15 and e20_15<e50_15 and 32<=r15<=50 and c<ema200:
+                            LAST[yahoo]=time.time()
+                            send(f"📈 *L15 SELL {label} 70%*\nRSI15 {r15:.0f} Trend DOWN✅\n⏰ {cur}→{exp15} {MERCATO} {c:.5f} 👉 SELL")
+                        elif c2<o2 and c>o and body>c2*0.6 and r<48 and c>ema20:
+                            LAST[yahoo]=time.time()
+                            send(f"🔥 *ENGULFING BUY {label} 68%*\n⏰ {cur}→{exp5} {MERCATO} {c:.5f} 👉 BUY")
+                        elif c2>o2 and c<o and body>c2*0.6 and r>52 and c<ema20:
+                            LAST[yahoo]=time.time()
+                            send(f"🔥 *ENGULFING SELL {label} 68%*\n⏰ {cur}→{exp5} {MERCATO} {c:.5f} 👉 SELL")
 
-                    except Exception as e:
-                        print(e); pass
+                    except: pass
         except: pass
         time.sleep(1)
 
