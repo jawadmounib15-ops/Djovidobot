@@ -3,12 +3,11 @@ from datetime import datetime, timedelta
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V105 3 FILTRI OTC+REALI ONLINE"
+def home(): return "V105 LARGATO OTC+REALI ONLINE"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 
-# REALI = =X | OTC = -OTC ma analizzato con =X
 SYMBOLS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","NZDUSD=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","CADJPY=X","NZDJPY=X","CHFJPY=X","EURCHF=X","GBPCHF=X","AUDCHF=X","EURAUD=X","GBPAUD=X","EURCAD=X","AUDCAD=X","NZDCAD=X","AUDNZD=X","CADCHF=X","EURNZD=X"]
 PAIRS_REAL = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","NZD/USD","USD/CHF","USD/CAD","EUR/JPY","GBP/JPY","EUR/GBP","AUD/JPY","CAD/JPY","NZD/JPY","CHF/JPY","EUR/CHF","GBP/CHF","AUD/CHF","EUR/AUD","GBP/AUD","EUR/CAD","AUD/CAD","NZD/CAD","AUD/NZD","CAD/CHF","EUR/NZD"]
 PAIRS_OTC = ["EUR/USD-OTC","GBP/USD-OTC","USD/JPY-OTC","AUD/USD-OTC","NZD/USD-OTC","USD/CHF-OTC","USD/CAD-OTC","EUR/JPY-OTC","GBP/JPY-OTC","EUR/GBP-OTC","AUD/JPY-OTC","CAD/JPY-OTC","NZD/JPY-OTC","CHF/JPY-OTC","EUR/CHF-OTC","GBP/CHF-OTC","AUD/CHF-OTC","EUR/AUD-OTC","GBP/AUD-OTC","EUR/CAD-OTC","AUD/CAD-OTC","NZD/CAD-OTC","AUD/NZD-OTC","CAD/CHF-OTC","EUR/NZD-OTC"]
@@ -32,7 +31,7 @@ def rsi(s,p=14):
 
 def bot():
     global WIN,LOSS,CHECK
-    send("💀 *V105 3 FILTRI OTC+REALI ONLINE*\n25 coppie REALI + 25 OTC = 50 totali\nBUY: RSI>63 + BB UP + Trend DOWN\nSELL: RSI<37 + BB DOWN + Trend UP\n✅ ANALISI PRECISA + SCADENZA")
+    send("💀 *V105 LARGATO ONLINE*\nRSI 60/40 + BB 25% + EMA largo\n25 REALI + 25 OTC")
     while True:
         try:
             now=datetime.now()
@@ -59,7 +58,7 @@ def bot():
                 CHECK=time.time()
                 for yahoo, label in zip(SYMBOLS, PAIRS_LABEL):
                     if yahoo in PEND: continue
-                    if yahoo in LAST and time.time()-LAST[yahoo]<1800: continue # ANTI-DUP 30min
+                    if yahoo in LAST and time.time()-LAST[yahoo]<1800: continue
                     try:
                         df=yf.download(yahoo,period="10d",interval="5m",progress=False)
                         if len(df)<210: continue
@@ -76,13 +75,13 @@ def bot():
                         ora_now = now.strftime("%H:%M:%S")
                         ora_scad = (now + timedelta(minutes=5)).strftime("%H:%M:%S")
                         sig=None
-                        toll=(up-low)*0.25
-                        if r>=63 and c>=up-toll and c<ema: sig="BUY"
-                        elif r<=37 and c<=low+toll and c>ema: sig="SELL"
+                        toll=(up-low)*0.25 # LARGATO DA 0.15 A 0.25
+                        if r>=60 and c>=up-toll and c<ema*1.0003: sig="BUY" # LARGATO DA 63 A 60
+                        elif r<=40 and c<=low+toll and c>ema*0.9997: sig="SELL" # LARGATO DA 37 A 40
                         if sig:
                             PEND[yahoo]=(sig,c,now,label,MERCATO)
                             LAST[yahoo]=time.time()
-                            send(f"💀 *5M {sig} {label} 3 FILTRI {MERCATO} ANALIZZATO {ora_now}*\n📊 RSI:{r:.0f} BB:{up:.5f}/{low:.5f} EMA200:{ema:.5f}\n💰 Prezzo: {c:.5f}\n⏰ Entrata: {ora_now} → Scadenza: {ora_scad} (5 MIN)\n👉 *POCKET: {'SELL' if sig=='BUY' else 'BUY'}*\n🎯 {MERCATO} ANALIZZATO ORA")
+                            send(f"💀 *5M {sig} {label} LARGATO {MERCATO} {ora_now}*\n📊 RSI:{r:.0f} (60/40) BB toll 25%\n💰 {c:.5f} EMA:{ema:.5f}\n⏰ {ora_now} → {ora_scad} (5 MIN)\n👉 POCKET: *{'SELL' if sig=='BUY' else 'BUY'}*")
                     except: pass
         except: pass
         time.sleep(1)
