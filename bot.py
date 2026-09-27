@@ -9,104 +9,63 @@ bot = Bot(token=TELEGRAM_TOKEN)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot REALI LARGO ON"
+def home(): return "Bot ULTRA LARGO OTC ON"
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
-COPPIE = [
-"AUDCAD=X","AUDCHF=X","AUDUSD=X","CADCHF=X","CADJPY=X",
-"CHFJPY=X","EURCHF=X","GBPUSD=X","AUDJPY=X","AUDNZD=X",
-"EURGBP=X","GBPJPY=X","EURJPY=X","NZDUSD=X"
-]
+COPPIE = ["AUDCAD=X","AUDCHF=X","AUDUSD=X","CADCHF=X","CADJPY=X","CHFJPY=X","EURCHF=X","GBPUSD=X","AUDJPY=X","AUDNZD=X","EURGBP=X","GBPJPY=X","EURJPY=X","NZDUSD=X"]
 
-def is_weekend(): return datetime.now().weekday() >= 5
-
-def analizza_engulfing(pair, tf):
+def analizza_ultra(pair, tf):
     try:
-        df = yf.Ticker(pair).history(period="5d", interval=tf)
-        if len(df) < 100: return None
+        df = yf.Ticker(pair).history(period="7d", interval=tf)
+        if len(df) < 10: return None
         df.rename(columns={'Open':'open','High':'high','Low':'low','Close':'close'}, inplace=True)
-        df['ema9'] = df['close'].ewm(9).mean()
-        df['ema21'] = df['close'].ewm(21).mean()
-        df['ema50'] = df['close'].ewm(50).mean()
         delta = df['close'].diff()
         gain = delta.where(delta>0,0).rolling(14).mean()
         loss = -delta.where(delta<0,0).rolling(14).mean()
         df['rsi'] = 100 - (100 / (1 + gain/loss))
-        df['atr'] = (df['high']-df['low']).rolling(14).mean()
-        last = df.iloc[-1]; prev = df.iloc[-2]; prev2 = df.iloc[-3]
-        trend_call = last['ema9'] > last['ema21'] > last['ema50']
-        trend_put = last['ema9'] < last['ema21'] < last['ema50']
-        rsi_ok = 45 <= last['rsi'] <= 57
-        body = abs(last['close']-last['open']); range_c = last['high']-last['low']
-        body_big = body > range_c * 0.5 if range_c>0 else False
-        call_eng = last['close'] > last['open'] and prev['close'] < prev['open'] and last['close'] > prev['open'] and body_big
-        put_eng = last['close'] < last['open'] and prev['close'] > prev['open'] and last['close'] < prev['open'] and body_big
-        momentum_call = prev['close'] >= prev2['close']*0.999
-        momentum_put = prev['close'] <= prev2['close']*1.001
-        dist = abs(last['close'] - last['ema50']) / last['atr'] if last['atr']>0 else 10
-        if trend_call and rsi_ok and call_eng and momentum_call and dist < 2.2: return "CALL", last['rsi'], "ENGULFING"
-        if trend_put and rsi_ok and put_eng and momentum_put and dist < 2.2: return "PUT", last['rsi'], "ENGULFING"
-        return None
-    except: return None
-
-def analizza_pinbar(pair, tf):
-    try:
-        df = yf.Ticker(pair).history(period="5d", interval=tf)
-        if len(df) < 100: return None
-        df.rename(columns={'Open':'open','High':'high','Low':'low','Close':'close'}, inplace=True)
-        df['ema21'] = df['close'].ewm(21).mean()
-        df['ema50'] = df['close'].ewm(50).mean()
-        delta = df['close'].diff()
-        gain = delta.where(delta>0,0).rolling(14).mean()
-        loss = -delta.where(delta<0,0).rolling(14).mean()
-        df['rsi'] = 100 - (100 / (1 + gain/loss))
-        last = df.iloc[-1]
+        last = df.iloc[-1]; prev = df.iloc[-2]
         body = abs(last['close']-last['open'])
-        upper_wick = last['high'] - max(last['close'], last['open'])
-        lower_wick = min(last['close'], last['open']) - last['low']
+        upper = last['high'] - max(last['close'], last['open'])
+        lower = min(last['close'], last['open']) - last['low']
         range_c = last['high']-last['low']
-        if range_c == 0 or body == 0: return None
-        corpo_piccolo = body < range_c * 0.4
-        is_pinbar_call = lower_wick > body * 2.0 and upper_wick < body * 0.8 and corpo_piccolo
-        is_pinbar_put = upper_wick > body * 2.0 and lower_wick < body * 0.8 and corpo_piccolo
-        rsi_ok = 42 <= last['rsi'] <= 58
-        near_ema = abs(last['close'] - last['ema21']) < (range_c * 2.5)
-        if is_pinbar_call and rsi_ok and near_ema and last['ema21'] > last['ema50']:
-            return "CALL", last['rsi'], f"PINBAR {lower_wick/body:.1f}x"
-        if is_pinbar_put and rsi_ok and near_ema and last['ema21'] < last['ema50']:
-            return "PUT", last['rsi'], f"PINBAR {upper_wick/body:.1f}x"
+        if range_c == 0: return None
+        
+        # 1. ENGULFING ULTRA LARGO - senza trend
+        eng_call = last['close'] > last['open'] and prev['close'] < prev['open'] and last['close'] > prev['open'] and last['open'] < prev['close']
+        eng_put = last['close'] < last['open'] and prev['close'] > prev['open'] and last['close'] < prev['open'] and last['open'] > prev['close']
+        
+        # 2. PINBAR ULTRA LARGO
+        pin_call = lower > body * 1.5 and body < range_c * 0.5 if body>0 else False
+        pin_put = upper > body * 1.5 and body < range_c * 0.5 if body>0 else False
+        
+        rsi_ok = 35 <= last['rsi'] <= 65
+        
+        if rsi_ok and eng_call: return "CALL", last['rsi'], "ENGULFING ULTRA"
+        if rsi_ok and eng_put: return "PUT", last['rsi'], "ENGULFING ULTRA"
+        if rsi_ok and pin_call: return "CALL", last['rsi'], f"PINBAR {lower/body:.1f}x"
+        if rsi_ok and pin_put: return "PUT", last['rsi'], f"PINBAR {upper/body:.1f}x"
         return None
     except: return None
 
 async def bot_loop():
-    tipo = "OTC 🔶" if is_weekend() else "REALI 📊"
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔧 Bot LARGO ON\n14 REALI | Engulfing 50% + Pinbar 2.0x\nRSI 42-58 | Modalità {tipo} | 1 msg/5min")
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔧 Bot ULTRA LARGO ON\n14 REALI | RSI 35-65 | Solo Engulf/Pin\nOTC Domenica | 1 msg/2min")
     while True:
-        await asyncio.sleep(300)
-        etichetta = "OTC" if is_weekend() else "REAL"
+        await asyncio.sleep(120) # ogni 2 min ora
         best = None
-        for tf in ["5m","15m"]:
+        for tf in ["5m","15m","1h"]:
             for coppia in COPPIE:
-                res = analizza_engulfing(coppia, tf)
+                res = analizza_ultra(coppia, tf)
                 if res:
                     direz, rsi, tipo_sig = res
-                    best = (coppia.replace("=X",""), tf, direz, rsi, tipo_sig, etichetta); break
+                    best = (coppia.replace("=X",""), tf, direz, rsi, tipo_sig); break
             if best: break
-        if not best:
-            for tf in ["5m","15m"]:
-                for coppia in COPPIE:
-                    res = analizza_pinbar(coppia, tf)
-                    if res:
-                        direz, rsi, tipo_sig = res
-                        best = (coppia.replace("=X",""), tf, direz, rsi, tipo_sig, etichetta); break
-                if best: break
         ora = datetime.now().strftime('%H:%M:%S')
         if best:
-            nome, tf, direz, rsi, tipo_sig, et = best
+            nome, tf, direz, rsi, tipo_sig = best
             emoji = "🟢" if direz=="CALL" else "🔴"
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} {tf} {et} - {direz}\n{tipo_sig} | RSI {rsi:.1f} | {ora}")
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} {tf} OTC - {direz}\n{tipo_sig} | RSI {rsi:.1f} | {ora}")
         else:
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔍 {ora} - Scansione ok | {etichetta} | 14 coppie")
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔍 {ora} - Scan 14 coppie 5m/15m/1h - nessun pattern al momento")
 
 def start_bot(): asyncio.run(bot_loop())
 if __name__ == "__main__":
