@@ -75,7 +75,7 @@ def bot():
                         ora_now = now.strftime("%H:%M:%S")
                         ora_scad = (now + timedelta(minutes=5)).strftime("%H:%M:%S")
                         sig=None
-                        toll=(up-low)*0.15 # LARGATO DA 0.15 A 0.25
+                        toll=(up-low)*0.20 # LARGATO DA 0.15 A 0.20
                         if r>=60 and c>=up-toll and c<ema*1.0003: sig="BUY" # LARGATO DA 63 A 60
                         elif r<=40 and c<=low+toll and c>ema*0.9997: sig="SELL" # LARGATO DA 37 A 40
                         if sig:
