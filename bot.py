@@ -9,63 +9,81 @@ bot = Bot(token=TELEGRAM_TOKEN)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot ULTRA LARGO OTC ON"
+def home(): return "Bot FALLBACK ON"
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
 COPPIE = ["AUDCAD=X","AUDCHF=X","AUDUSD=X","CADCHF=X","CADJPY=X","CHFJPY=X","EURCHF=X","GBPUSD=X","AUDJPY=X","AUDNZD=X","EURGBP=X","GBPJPY=X","EURJPY=X","NZDUSD=X"]
 
-def analizza_ultra(pair, tf):
+def analizza(pair):
     try:
-        df = yf.Ticker(pair).history(period="7d", interval=tf)
-        if len(df) < 10: return None
-        df.rename(columns={'Open':'open','High':'high','Low':'low','Close':'close'}, inplace=True)
-        delta = df['close'].diff()
-        gain = delta.where(delta>0,0).rolling(14).mean()
-        loss = -delta.where(delta<0,0).rolling(14).mean()
-        df['rsi'] = 100 - (100 / (1 + gain/loss))
-        last = df.iloc[-1]; prev = df.iloc[-2]
-        body = abs(last['close']-last['open'])
-        upper = last['high'] - max(last['close'], last['open'])
-        lower = min(last['close'], last['open']) - last['low']
-        range_c = last['high']-last['low']
-        if range_c == 0: return None
-        
-        # 1. ENGULFING ULTRA LARGO - senza trend
-        eng_call = last['close'] > last['open'] and prev['close'] < prev['open'] and last['close'] > prev['open'] and last['open'] < prev['close']
-        eng_put = last['close'] < last['open'] and prev['close'] > prev['open'] and last['close'] < prev['open'] and last['open'] > prev['close']
-        
-        # 2. PINBAR ULTRA LARGO
-        pin_call = lower > body * 1.5 and body < range_c * 0.5 if body>0 else False
-        pin_put = upper > body * 1.5 and body < range_c * 0.5 if body>0 else False
-        
-        rsi_ok = 35 <= last['rsi'] <= 65
-        
-        if rsi_ok and eng_call: return "CALL", last['rsi'], "ENGULFING ULTRA"
-        if rsi_ok and eng_put: return "PUT", last['rsi'], "ENGULFING ULTRA"
-        if rsi_ok and pin_call: return "CALL", last['rsi'], f"PINBAR {lower/body:.1f}x"
-        if rsi_ok and pin_put: return "PUT", last['rsi'], f"PINBAR {upper/body:.1f}x"
+        for tf in ["15m","5m","1h"]:
+            df = yf.Ticker(pair).history(period="10d", interval=tf)
+            if len(df) < 20: continue
+            df.rename(columns={'Open':'open','High':'high','Low':'low','Close':'close'}, inplace=True)
+            delta = df['close'].diff()
+            gain = delta.where(delta>0,0).rolling(14).mean()
+            loss = -delta.where(delta<0,0).rolling(14).mean()
+            df['rsi'] = 100 - (100 / (1 + gain/loss))
+            last = df.iloc[-1]; prev = df.iloc[-2]
+
+            body = abs(last['close']-last['open'])
+            lower = min(last['close'], last['open']) - last['low']
+            upper = last['high'] - max(last['close'], last['open'])
+            rng = last['high']-last['low']
+            if rng==0 or body==0: continue
+
+            # 1. ENGULFING
+            if last['close'] > last['open'] and prev['close'] < prev['open'] and last['close'] > prev['open']:
+                if 30 <= last['rsi'] <= 70: return tf, "CALL", last['rsi'], "ENGULF"
+            if last['close'] < last['open'] and prev['close'] > prev['open'] and last['close'] < prev['open']:
+                if 30 <= last['rsi'] <= 70: return tf, "PUT", last['rsi'], "ENGULF"
+            # 2. PINBAR
+            if lower > body*1.2:
+                if last['rsi'] < 60: return tf, "CALL", last['rsi'], f"PIN {lower/body:.1f}x"
+            if upper > body*1.2:
+                if last['rsi'] > 40: return tf, "PUT", last['rsi'], f"PIN {upper/body:.1f}x"
+        # 3. FALLBACK RSI PURO - garantisce segnale
+        df = yf.Ticker(pair).history(period="10d", interval="15m")
+        if len(df) > 20:
+            df.rename(columns={'Open':'open','High':'high','Low':'low','Close':'close'}, inplace=True)
+            delta = df['close'].diff()
+            gain = delta.where(delta>0,0).rolling(14).mean()
+            loss = -delta.where(delta<0,0).rolling(14).mean()
+            df['rsi'] = 100 - (100 / (1 + gain/loss))
+            last = df.iloc[-1]
+            if last['rsi'] < 42: return "15m", "CALL", last['rsi'], "RSI BASSO"
+            if last['rsi'] > 58: return "15m", "PUT", last['rsi'], "RSI ALTO"
         return None
     except: return None
 
 async def bot_loop():
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔧 Bot ULTRA LARGO ON\n14 REALI | RSI 35-65 | Solo Engulf/Pin\nOTC Domenica | 1 msg/2min")
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔧 Bot FALLBACK ON\n14 REALI | Garanzia segnale | 2min")
     while True:
-        await asyncio.sleep(120) # ogni 2 min ora
+        await asyncio.sleep(120)
         best = None
-        for tf in ["5m","15m","1h"]:
-            for coppia in COPPIE:
-                res = analizza_ultra(coppia, tf)
-                if res:
-                    direz, rsi, tipo_sig = res
-                    best = (coppia.replace("=X",""), tf, direz, rsi, tipo_sig); break
-            if best: break
+        candidati = []
+        for coppia in COPPIE:
+            res = analizza(coppia)
+            if res:
+                tf, direz, rsi, tipo = res
+                candidati.append((coppia, tf, direz, rsi, tipo))
+                # prendi il più estremo
+                if "ENGULF" in tipo or "PIN" in tipo:
+                    best = (coppia.replace("=X",""), tf, direz, rsi, tipo)
+                    break
+        if not best and candidati:
+            # se solo RSI, prendi il più estremo
+            candidati.sort(key=lambda x: abs(x[3]-50), reverse=True)
+            c = candidati[0]
+            best = (c[0].replace("=X",""), c[1], c[2], c[3], c[4])
+
         ora = datetime.now().strftime('%H:%M:%S')
         if best:
-            nome, tf, direz, rsi, tipo_sig = best
+            nome, tf, direz, rsi, tipo = best
             emoji = "🟢" if direz=="CALL" else "🔴"
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} {tf} OTC - {direz}\n{tipo_sig} | RSI {rsi:.1f} | {ora}")
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} {tf} OTC - {direz}\n{tipo} | RSI {rsi:.1f} | {ora}")
         else:
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔍 {ora} - Scan 14 coppie 5m/15m/1h - nessun pattern al momento")
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔍 {ora} - yfinance vuoto, riprovo")
 
 def start_bot(): asyncio.run(bot_loop())
 if __name__ == "__main__":
