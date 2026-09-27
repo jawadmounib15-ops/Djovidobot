@@ -3,15 +3,19 @@ from flask import Flask, jsonify, render_template_string, request
 from datetime import datetime, timezone, timedelta
 app = Flask(__name__)
 
+# AGGIUNTE REALI PER DOMANI LUNEDI
 PAIRS = {
     "EUR/USD-OTC":"EURUSD=X","GBP/USD-OTC":"GBPUSD=X","USD/JPY-OTC":"USDJPY=X",
     "AUD/USD-OTC":"AUDUSD=X","USD/CAD-OTC":"USDCAD=X","USD/CHF-OTC":"USDCHF=X",
     "EUR/JPY-OTC":"EURJPY=X","EUR/GBP-OTC":"EURGBP=X","GBP/JPY-OTC":"GBPJPY=X",
     "AUD/JPY-OTC":"AUDJPY=X","EUR/AUD-OTC":"EURAUD=X","NZD/USD-OTC":"NZDUSD=X",
     "BTC/USD-OTC":"BTC-USD","ETH/USD-OTC":"ETH-USD","SOL/USD-OTC":"SOL-USD",
-    "BNB/USD-OTC":"BNB-USD","EUR/CAD-OTC":"EURCAD=X","GBP/CAD-OTC":"GBPCAD=X"
+    "BNB/USD-OTC":"BNB-USD","EUR/CAD-OTC":"EURCAD=X","GBP/CAD-OTC":"GBPCAD=X",
+    # REALI - si attivano Lunedì notte
+    "EUR/USD":"EURUSD=X","GBP/USD":"GBPUSD=X","USD/JPY":"USDJPY=X",
+    "AUD/USD":"AUDUSD=X","USD/CAD":"USDCAD=X","EUR/GBP":"EURGBP=X"
 }
-ITALY_TZ = timezone(timedelta(hours=2)) # estate
+ITALY_TZ = timezone(timedelta(hours=2))
 
 def analyze_pair(y, tf_label):
     try:
@@ -28,84 +32,32 @@ def analyze_pair(y, tf_label):
         df['BB_UP']=df['SMA20']+2*std; df['BB_LOW']=df['SMA20']-2*std
         low14=l.rolling(14).min(); high14=h.rolling(14).max()
         df['STO_K']=100*(c-low14)/((high14-low14).replace(0,1)); df['STO_D']=df['STO_K'].rolling(3).mean()
-        last=df.iloc[-1]; prev=df.iloc[-2]
+        last=df.iloc[-1]
         price=float(last['Close']); ema9=float(last['EMA9']); ema21=float(last['EMA21']); ema50=float(last['EMA50'])
         rsi=float(last['RSI']); bb_up=float(last['BB_UP']); bb_low=float(last['BB_LOW'])
         k=float(last['STO_K']); d=float(last['STO_D']); close_c=float(last['Close']); open_c=float(last['Open'])
         now_italy = datetime.now(ITALY_TZ)
-
+        
+        # FILTRI STRETTI
         f1_buy = ema9 > ema21 and price > ema21; f1_sell = ema9 < ema21 and price < ema21
         f1_extra_buy = ema21 > ema50; f1_extra_sell = ema21 < ema50
-        f2_buy = 40 <= rsi <= 61; f2_sell = 39 <= rsi <= 60
-        f3_buy = price < bb_up * 0.988; f3_sell = price > bb_low * 1.012
-        f4_buy = 23 <= k <= 68 and k > d; f4_sell = 23 <= k <= 68 and k < d
+        f2_buy = 42 <= rsi <= 58; f2_sell = 42 <= rsi <= 58  # RSI più stretto
+        f3_buy = price < bb_up * 0.985; f3_sell = price > bb_low * 1.015 # BB più stretto
+        f4_buy = 25 <= k <= 65 and k > d; f4_sell = 25 <= k <= 65 and k < d
         f5_buy = close_c > open_c; f5_sell = close_c < open_c
-
         buy_pass = sum([f1_buy,f2_buy,f3_buy,f4_buy,f5_buy])
         sell_pass = sum([f1_sell,f2_sell,f3_sell,f4_sell,f5_sell])
 
+        # SOLO 92% e 95% - NIENTE 91%
         if buy_pass==5 and f1_extra_buy: score=95; action="BUY 95% SICURA"; reason=f"5/5 + TREND {tf_label} RSI {rsi:.0f}"
         elif sell_pass==5 and f1_extra_sell: score=95; action="SELL 95% SICURA"; reason=f"5/5 + TREND {tf_label} RSI {rsi:.0f}"
         elif buy_pass==5 or sell_pass==5: score=92; action="BUY 92%" if buy_pass==5 else "SELL 92%"; reason=f"5/5 PERFETTI {tf_label}"
-        elif buy_pass==4 and f1_extra_buy: score=91; action="BUY 91%"; reason=f"4/5 + TREND {tf_label} RSI {rsi:.0f}"
-        elif sell_pass==4 and f1_extra_sell: score=91; action="SELL 91%"; reason=f"4/5 + TREND {tf_label} RSI {rsi:.0f}"
-        else: score=0; action="WAIT"; reason=f"{buy_pass}/5 sotto 91% {tf_label}"
+        else: score=0; action="WAIT"; reason=f"{buy_pass}/5 sotto 92% {tf_label} - FILTRATO"
 
         return {"price":round(price,5),"rsi":round(rsi,1),"k":round(k,0),"score":score,"action":action,"reason":reason,"tf":tf_label,"time":now_italy.strftime("%H:%M:%S"),"timestamp":now_italy.timestamp()}
     except: return None
 
-HTML = """
-<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>91% FIX VECCHI</title>
-<style>body{background:#0e0e10;color:#fff;font-family:system-ui;padding:12px}
-select{width:100%;padding:12px;border-radius:10px;background:#1a1a1f;color:#fff;font-size:16px;border:1px solid #333;margin:6px 0}
-.row{display:flex;gap:8px}.row select{flex:1}
-.card{background:#1a1a1f;padding:14px;border-radius:14px;margin:10px 0;border-left:5px solid #444}
-.sbuy{border-left-color:gold;border:3px solid gold}.ssell{border-left-color:gold;border:3px solid gold}
-.badge{padding:7px 14px;border-radius:20px;font-weight:bold}.sB{background:gold;color:#000;animation:blink 1s infinite}.gB{background:#00c853;color:#000}.yB{background:#ffab00;color:#000}.waitB{background:#333}
-.fresh{background:#00e676;color:#000;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:bold}
-@keyframes blink{50%{opacity:0.5}}
-button{width:100%;padding:13px;background:gold;color:#000;border:none;border-radius:10px;font-weight:bold;font-size:17px;margin-top:6px}
-.time{font-size:12px;color:#aaa;margin-top:4px}
-</style></head><body>
-<h2>📈 SOLO 91%+ - FIX VECCHI</h2>
-<div class="row">
-<select id="pair"><option>BTC/USD-OTC</option><option>SOL/USD-OTC</option><option>ETH/USD-OTC</option><option>EUR/USD-OTC</option><option>USD/JPY-OTC</option></select>
-<select id="tf"><option value="1m">1m</option><option value="3m">3m</option><option value="5m">5m</option><option value="15m" selected>15m</option><option value="30m">30m</option><option value="1h">1h</option></select>
-</div>
-<button onclick="analyze()">ANALIZZA 🔍</button>
-<label style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" id="sound" checked> 🔊 Suona da 91%+</label>
-<div id="result"></div><hr><h3>Auto Scan - Solo segnali FRESCHI < 3 min</h3><div id="auto">...</div>
-<audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
-<script>
-async function analyze(){
- let p=document.getElementById('pair').value; let tf=document.getElementById('tf').value;
- document.getElementById('result').innerHTML='Analizzo '+p+' '+tf+'...';
- let r=await fetch('/api/analyze?pair='+p+'&tf='+tf); let d=await r.json();
- if(!d || d.score<91){document.getElementById('result').innerHTML='<div class=card>⏳ WAIT - sotto 91% - niente segnale</div>'; return;}
- let cls='card '+(d.action.includes('BUY')?'sbuy':'ssell'); let badge=d.score>=95?'sB':d.score>=92?'gB':'yB';
- document.getElementById('result').innerHTML=`<div class="${cls}"><b>${p} [${d.tf}]</b> <span class="badge ${badge}">${d.action} ${d.score}%</span> <span class="fresh">🟢 FRESCO ORA ${d.time}</span><br><div class="time">⏰ ${d.time} Italia | ${d.reason}</div><small>Prezzo ${d.price}</small></div>`;
- if(document.getElementById('sound').checked){document.getElementById('beep').play(); if(navigator.vibrate) navigator.vibrate([400,100,400]);}
-}
-async function scanAuto(){
- let tf=document.getElementById('tf').value;
- try{
-  let r=await fetch('/api/scan?tf='+tf); let data=await r.json(); let html=''; let now=Date.now()/1000;
-  data.forEach(c=>{
-   let ageSec = now - c.timestamp;
-   if(ageSec > 180) return; // NASCONDE se più vecchio di 3 minuti
-   let cls='card '+(c.action.includes('BUY')?'sbuy':'ssell'); let b=c.score>=95?'sB':c.score>=92?'gB':'yB';
-   let age = Math.floor(ageSec);
-   html+=`<div class="${cls}"><b>${c.pair} [${c.tf}]</b> <span class="badge ${b}">${c.action} ${c.score}%</span><br><span class="fresh">🟢 FRESCO ${age}s fa - ENTRA ORA ${c.time}</span><div class="time">⏰ ${c.time} Italia | ${c.reason}</div></div>`;
-   if(document.getElementById('sound').checked && age < 30){document.getElementById('beep').play();}
-  });
-  if(html=='') html='<div class=card>⏳ Nessun segnale fresco negli ultimi 3 min su '+tf+' - aspetta BEEP</div>';
-  document.getElementById('auto').innerHTML=html;
- }catch(e){}
-}
-analyze(); scanAuto(); setInterval(scanAuto,10000);
-</script></body></html>
-"""
+HTML = """ <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"> <title>92% STRICT - SOLO REALI</title> <style>body{background:#0e0e10;color:#fff;font-family:system-ui;padding:12px} select{width:100%;padding:12px;border-radius:10px;background:#1a1a1f;color:#fff;font-size:16px;border:1px solid #333;margin:6px 0} .row{display:flex;gap:8px}.row select{flex:1} .card{background:#1a1a1f;padding:14px;border-radius:14px;margin:10px 0;border-left:5px solid #444} .sbuy{border-left-color:gold;border:3px solid gold}.ssell{border-left-color:gold;border:3px solid gold} .badge{padding:7px 14px;border-radius:20px;font-weight:bold}.sB{background:gold;color:#000;animation:blink 1s infinite}.gB{background:#00c853;color:#000}.waitB{background:#333} .fresh{background:#00e676;color:#000;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:bold} @keyframes blink{50%{opacity:0.5}} button{width:100%;padding:13px;background:gold;color:#000;border:none;border-radius:10px;font-weight:bold;font-size:17px;margin-top:6px} .time{font-size:12px;color:#aaa;margin-top:4px} </style></head><body> <h2>📈 SOLO 92%+ STRETT0 - PRONTO PER REALI</h2> <div class="row"> <select id="pair"><option>EUR/USD</option><option>GBP/USD</option><option>EUR/USD-OTC</option><option>BTC/USD-OTC</option><option>SOL/USD-OTC</option></select> <select id="tf"><option value="5m">5m - OTC</option><option value="15m" selected>15m - CONSIGLIATO REALI</option><option value="1h">1h</option></select> </div> <button onclick="analyze()">ANALIZZA 🔍</button> <label style="display:flex;align-items:center;gap:8px;margin:10px 0"><input type="checkbox" id="sound" checked> 🔊 Suona da 92%+</label> <div id="result"></div><hr><h3>Auto Scan - Solo 92%+ FRESCHI</h3><div id="auto">...</div> <audio id="beep" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio> <script> async function analyze(){ let p=document.getElementById('pair').value; let tf=document.getElementById('tf').value; document.getElementById('result').innerHTML='Analizzo '+p+' '+tf+'...'; let r=await fetch('/api/analyze?pair='+p+'&tf='+tf); let d=await r.json(); if(!d || d.score<92){document.getElementById('result').innerHTML='<div class=card>⏳ WAIT - sotto 92% - FILTRATO (più stretto)</div>'; return;} let cls='card '+(d.action.includes('BUY')?'sbuy':'ssell'); let badge=d.score>=95?'sB':'gB'; document.getElementById('result').innerHTML=`<div class="${cls}"><b>${p} [${d.tf}]</b> <span class="badge ${badge}">${d.action} ${d.score}%</span> <span class="fresh">🟢 FRESCO ORA ${d.time}</span><br><div class="time">⏰ ${d.time} Italia | ${d.reason}</div><small>Prezzo ${d.price}</small></div>`; if(document.getElementById('sound').checked){document.getElementById('beep').play();} } async function scanAuto(){ let tf=document.getElementById('tf').value; try{ let r=await fetch('/api/scan?tf='+tf); let data=await r.json(); let html=''; let now=Date.now()/1000; let maxAge = tf==='15m' ? 600 : 180; // 10 min per 15m, 3 min per 5m data.forEach(c=>{ let ageSec = now - c.timestamp; if(ageSec > maxAge) return; let cls='card '+(c.action.includes('BUY')?'sbuy':'ssell'); let b=c.score>=95?'sB':'gB'; let age = Math.floor(ageSec); html+=`<div class="${cls}"><b>${c.pair} [${c.tf}]</b> <span class="badge ${b}">${c.action} ${c.score}%</span><br><span class="fresh">🟢 FRESCO ${age}s fa - ENTRA ORA ${c.time}</span><div class="time">⏰ ${c.time} Italia | ${c.reason}</div></div>`; }); if(html=='') html='<div class=card>⏳ Nessun 92%+ fresco negli ultimi '+(maxAge/60)+' min su '+tf+' - è normale, è più stretto</div>'; document.getElementById('auto').innerHTML=html; }catch(e){} } analyze(); scanAuto(); setInterval(scanAuto,10000); </script></body></html> """
 @app.route('/')
 def home(): return render_template_string(HTML)
 @app.route('/api/analyze')
@@ -117,6 +69,7 @@ def api_scan():
     tf=request.args.get('tf','15m'); res=[]
     for lab,y in PAIRS.items():
         d=analyze_pair(y,tf)
-        if d and d['score']>=91: res.append({"pair":lab,**d})
+        if d and d['score']>=92: # SOLO 92%+
+            res.append({"pair":lab,**d})
     return jsonify(sorted(res,key=lambda x:x['score'],reverse=True)[:6])
 if __name__=='__main__': app.run(host="0.0.0.0",port=10000)
