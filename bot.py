@@ -1,10 +1,10 @@
-# bot.py - V-OTC 3MIN + AVVISO 5MIN
+# bot.py - V-OTC PELO FINAL - Anti controtrend
 import os, time, random, requests, yfinance as yf, threading, pandas as pd
 from datetime import datetime, timedelta
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "V-OTC 3MIN + AVVISO 5MIN"
+def home(): return "V-OTC PELO FINAL ONLINE"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
@@ -18,40 +18,35 @@ def send(m):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", json={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"},timeout=10)
     except: pass
 
-def get_df_safe(yahoo):
-    for interval, period in [("1m","2d"), ("5m","5d"), ("15m","10d")]:
+def get_df(yahoo):
+    for interval, period in [("1m","2d"), ("5m","5d")]:
         try:
             df = yf.download(yahoo, period=period, interval=interval, progress=False)
-            if len(df) >= 50:
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
+            if len(df)>=60:
+                if isinstance(df.columns,pd.MultiIndex): df.columns=df.columns.get_level_values(0)
                 return df, interval
         except: pass
     return None, None
 
 def bot_loop():
     global CHECK, LAST_SIGNAL, LAST_AVISO
-    send("🔔 *V-OTC 3MIN + AVVISO ONLINE*\nMando avviso ogni 5min se non trovo\nScadenza 3 MIN")
+    send("✂️ *V-OTC PELO FINAL ONLINE*\nFiltri pelo + Anti-GBP/JPY pump\nBUY 48-68 SELL 32-52 + no controtrend")
     while True:
         try:
             now=datetime.now()
-            if time.time()-CHECK >= 10:
+            if time.time()-CHECK >= 12:
                 CHECK=time.time()
-                if time.time() - LAST_SIGNAL < 120:
-                    # CONTROLLA SE DEVE MANDARE AVVISO
-                    if time.time() - LAST_AVISO >= 300: # 5 min
-                        minuti = int((time.time() - LAST_SIGNAL)/60)
-                        send(f"🔍 *Nessun segnale da {minuti} min*\nBot attivo, cerco... {datetime.now().strftime('%H:%M:%S')}\nMercato calmo, nessun setup 9/21")
-                        LAST_AVISO = time.time()
+                if time.time()-LAST_SIGNAL < 150:
+                    if time.time()-LAST_AVISO >= 300:
+                        send(f"🔍 Nessun setup pelo da 5 min... mercato senza trend {now.strftime('%H:%M:%S')}")
+                        LAST_AVISO=time.time()
                     continue
 
-                combined = list(zip(SYMBOLS, PAIRS_OTC))
-                random.shuffle(combined)
-                trovato = False
-
+                combined=list(zip(SYMBOLS, PAIRS_OTC)); random.shuffle(combined)
+                trovato=False
                 for yahoo,label in combined:
-                    if yahoo in LAST and time.time()-LAST[yahoo]<180: continue
-                    df, used_interval = get_df_safe(yahoo)
+                    if yahoo in LAST and time.time()-LAST[yahoo]<240: continue
+                    df, tf = get_df(yahoo)
                     if df is None: continue
                     try:
                         df['EMA9']=df['Close'].ewm(span=9).mean()
@@ -60,23 +55,25 @@ def bot_loop():
                         delta=df['Close'].diff()
                         gain=delta.where(delta>0,0).ewm(alpha=1/14).mean()
                         loss=-delta.where(delta<0,0).ewm(alpha=1/14).mean()
-                        rs=gain/loss
-                        df['RSI']=100-(100/(1+rs))
+                        df['RSI']=100-(100/(1+gain/loss))
 
                         last=df.iloc[-2]
                         c=float(last['Close']); r=float(last['RSI'])
-                        ema9=float(last['EMA9']); ema21=float(last['EMA21'])
+                        ema9=float(last['EMA9']); ema21=float(last['EMA21']); ema50=float(last['EMA50'])
 
-                        if abs(ema9-ema21)/c < 0.00005: continue
+                        # PELO
+                        if abs(ema9-ema21)/c < 0.00012: continue
+                        if c>ema50 and ema9<ema21: continue
+                        if c<ema50 and ema9>ema21: continue
 
                         cur=now.strftime("%H:%M:%S")
                         exp3=(now+timedelta(minutes=3)).strftime("%H:%M:%S")
-
                         signal=None
-                        if ema9>ema21 and c>ema21 and 40<r<72:
-                            signal=f"🟢 *BUY {label} 3MIN*\nEMA9>21 RSI {r:.0f} [{used_interval}]\n⏰ {cur}→{exp3} {c:.5f} 👉 *BUY*"
-                        elif ema9<ema21 and c<ema21 and 28<r<60:
-                            signal=f"🔴 *SELL {label} 3MIN*\nEMA9<21 RSI {r:.0f} [{used_interval}]\n⏰ {cur}→{exp3} {c:.5f} 👉 *SELL*"
+
+                        if ema9>ema21 and c>ema21 and 48<=r<=68:
+                            signal=f"🟢 *BUY {label} 3MIN*\nEMA9>21 RSI {r:.0f} [{tf}] sopra 50✅\n⏰ {cur}→{exp3} {c:.5f} 👉 BUY"
+                        elif ema9<ema21 and c<ema21 and 32<=r<=52:
+                            signal=f"🔴 *SELL {label} 3MIN*\nEMA9<21 RSI {r:.0f} [{tf}] sotto 50✅\n⏰ {cur}→{exp3} {c:.5f} 👉 SELL"
 
                         if signal:
                             send(signal)
@@ -87,17 +84,11 @@ def bot_loop():
                             break
                     except: continue
 
-                # SE NON HA TROVATO NIENTE E SONO PASSATI 5 MIN
-                if not trovato and time.time() - LAST_AVISO >= 300:
-                    minuti = int((time.time() - LAST_SIGNAL)/60) if LAST_SIGNAL>0 else 0
-                    send(f"🔍 *Nessun segnale da {minuti} min*\nSto scansionando 12 coppie OTC...\nNessun setup valido ora - {now.strftime('%H:%M:%S')}")
-                    LAST_AVISO = time.time()
-
-        except Exception as e:
-            print(f"Loop: {e}")
+                if not trovato and time.time()-LAST_AVISO>=300:
+                    send(f"🔍 Nessun setup pelo - filtro attivo, evito fake {now.strftime('%H:%M:%S')}")
+                    LAST_AVISO=time.time()
+        except: pass
         time.sleep(1)
 
 threading.Thread(target=bot_loop,daemon=True).start()
-
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+if __name__=="__main__": app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
