@@ -1,10 +1,10 @@
-# bot.py - 3 LAVORI: PINBAR MIGLIORE 80% + OTC 3M + REALI 30M
+# bot.py - 3 LAVORI: 1 MSG AVVIO SOLO
 import os, time, random, requests, yfinance as yf, threading, pandas as pd
 from datetime import datetime, timedelta
 from flask import Flask
 app = Flask(__name__)
 @app.route('/')
-def home(): return "3 LAVORI MIGLIORATI"
+def home(): return "3 LAVORI - 1 MSG AVVIO"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
@@ -31,20 +31,17 @@ def get_df(yahoo, tipo):
         except: pass
     return None, None
 
-# ===== PINBAR MIGLIORE 80% - NON 100% =====
 def is_pinbar_migliore(o,h,l,c):
     body=abs(c-o); total=h-l
     if total==0: return None
     ratio=body/total
-    if ratio>0.30 or ratio<0.04: return None # 80%: 30% max invece di 28% blindato
+    if ratio>0.30 or ratio<0.04: return None
     up=h-max(o,c); low=min(o,c)-l
-    # 80%: 2.5x e 60% (via di mezzo tra 2.0 e 2.8)
     if low>body*2.5 and low>total*0.60 and up<body*0.6: return "BULL"
     if up>body*2.5 and up>total*0.60 and low<body*0.6: return "BEAR"
     return None
 
-def lavoro_1_pinbar_migliore():
-    send("📌 *LAVORO 1 PINBAR MIGLIORE 80% ONLINE*")
+def lavoro_1_pinbar():
     while True:
         try:
             now=datetime.now(); wk=now.weekday()>=5
@@ -55,38 +52,27 @@ def lavoro_1_pinbar_migliore():
                     df,tf=get_df(yahoo,"PIN")
                     if df is None: continue
                     try:
-                        df['EMA21']=df['Close'].ewm(21).mean(); df['EMA50']=df['Close'].ewm(50).mean()
-                        df['ATR']=(df['High']-df['Low']).ewm(14).mean()
+                        df['EMA21']=df['Close'].ewm(21).mean(); df['EMA50']=df['Close'].ewm(50).mean(); df['ATR']=(df['High']-df['Low']).ewm(14).mean()
                         delta=df['Close'].diff(); g=delta.where(delta>0,0).ewm(alpha=1/14).mean(); l=-delta.where(delta<0,0).ewm(alpha=1/14).mean()
                         df['RSI']=100-(100/(1+g/l))
                         last=df.iloc[-1]; o=float(last['Open']); h=float(last['High']); lo=float(last['Low']); c=float(last['Close']); r=float(last['RSI'])
                         ema21=float(last['EMA21']); ema50=float(last['EMA50']); atr=float(last['ATR'])
-
-                        if atr/c<0.00055: continue # 80%: 0.00055 invece di 0.0006 blindato
+                        if atr/c<0.00055: continue
                         pin=is_pinbar_migliore(o,h,lo,c)
                         if not pin: continue
-                        # 80%: vicino EMA 0.15% (in mezzo)
                         if abs(c-ema21)/c>0.0015 and abs(c-ema50)/c>0.0015: continue
-                        # 80%: contro-trend leggero (non 100% obbligatorio ma preferito)
-                        # se è BULL e prezzo è sotto EMA50 è meglio
-                        contro_trend_ok = (pin=="BULL" and c<ema50) or (pin=="BEAR" and c>ema50)
-
                         cur=now.strftime("%H:%M:%S"); exp=(now+timedelta(minutes=5)).strftime("%H:%M:%S")
-                        # 80%: RSI 30-48 BULL / 52-70 BEAR (migliore ma non estremo)
                         if pin=="BULL" and 30<=r<=48:
-                            extra = "⭐ CONTRO-TREND" if contro_trend_ok else ""
-                            send(f"📌🟢 *PINBAR BUY {label} 5M*\nMigliore 80% RSI {r:.0f} {extra} [{tf}]\nBody 30% Wick 2.5x EMA 0.15%\n⏰ {cur}→{exp} {c:.5f} 👉 BUY")
+                            send(f"📌🟢 *PINBAR BUY {label} 5M*\nMigliore 80% RSI {r:.0f} [{tf}]\n⏰ {cur}→{exp} {c:.5f} 👉 BUY")
                             LAST_PIN[key]=time.time()
                         elif pin=="BEAR" and 52<=r<=70:
-                            extra = "⭐ CONTRO-TREND" if contro_trend_ok else ""
-                            send(f"📌🔴 *PINBAR SELL {label} 5M*\nMigliore 80% RSI {r:.0f} {extra} [{tf}]\nBody 30% Wick 2.5x EMA 0.15%\n⏰ {cur}→{exp} {c:.5f} 👉 SELL")
+                            send(f"📌🔴 *PINBAR SELL {label} 5M*\nMigliore 80% RSI {r:.0f} [{tf}]\n⏰ {cur}→{exp} {c:.5f} 👉 SELL")
                             LAST_PIN[key]=time.time()
                     except: continue
             time.sleep(15)
         except: time.sleep(3)
 
 def lavoro_2_otc():
-    send("⚡ LAVORO 2 OTC 3MIN ONLINE")
     while True:
         try:
             now=datetime.now()
@@ -112,7 +98,6 @@ def lavoro_2_otc():
         except: time.sleep(3)
 
 def lavoro_3_reali():
-    send("🏦 LAVORO 3 REALI 30MIN ONLINE")
     while True:
         try:
             now=datetime.now()
@@ -138,9 +123,11 @@ def lavoro_3_reali():
             time.sleep(30)
         except: time.sleep(5)
 
-threading.Thread(target=lavoro_1_pinbar_migliore,daemon=True).start()
+threading.Thread(target=lavoro_1_pinbar,daemon=True).start()
 threading.Thread(target=lavoro_2_otc,daemon=True).start()
 threading.Thread(target=lavoro_3_reali,daemon=True).start()
 
-send("💎 *BOT 3 LAVORI MIGLIORATO 80%*\n📌 PINBAR 80% BEST\n⚡ OTC 3M\n🏦 REALI 30M")
+# UNICO MESSAGGIO AVVIO
+send("💎 *BOT 3 LAVORI ONLINE*\n📌 PINBAR 80% 5M\n⚡ OTC 3M\n🏦 REALI 30M")
+
 app.run(host="0.0.0.0",port=int(os.environ.get("PORT",10000)))
