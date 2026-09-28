@@ -31,7 +31,7 @@ def get_df(y, interval, period):
             try: df.columns=df.columns.get_level_values(0)
             except: pass
         c=df['Close']
-        df['EMA21']=c.ewm(21).mean(); df['EMA50']=c.ewm(50).mean()
+        df['EMA50']=c.ewm(50).mean(); df['EMA21']=c.ewm(20).mean()
         return df
     except: return None
 
@@ -58,7 +58,7 @@ def check_3_pilastri_contrario(y):
     prev_highs = df5['High'].iloc[-8:-1].max()
     sporge_bull = l <= prev_lows*0.999
     sporge_bear = h >= prev_highs*1.001
-    super_wick = wick > rng*0.70
+    super_wick = wick > rng*0.30
     if not (sporge_bull or sporge_bear or super_wick): return None
 
     ema21_trend = float(df_trend['EMA21'].iloc[-1]); ema50_trend = float(df_trend['EMA50'].iloc[-1])
@@ -90,7 +90,7 @@ def check_3_pilastri_contrario(y):
 def bot_loop():
     global AVVIO
     if not AVVIO:
-        send(f"🔄 *3 PILASTRI AL CONTRARIO*\nWick>62% - INVERTITO BUY/SELL\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
+        send(f"🔄 *3 PILASTRI AL CONTRARIO*\nWick>32% - INVERTITO BUY/SELL\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
         AVVIO=True
     while True:
         try:
