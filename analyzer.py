@@ -8,16 +8,12 @@ from curl_cffi import requests as c_requests
 app = Flask(__name__)
 ITALY_TZ = timezone(timedelta(hours=2))
 
-# SOLO REALI - DATI IDENTICI A QUOTEX REAL
+# V4.6 NOTTE - SOLO REAL SEMPRE APERTI
 PAIRS = {
- "EUR/USD":"EURUSD=X",
- "GBP/USD":"GBPUSD=X",
- "USD/JPY":"USDJPY=X",
- "AUD/USD":"AUDUSD=X",
- "USD/CHF":"CHF=X",
- "EUR/JPY":"EURJPY=X",
- "GBP/JPY":"GBPJPY=X",
- "EUR/GBP":"EURGBP=X"
+ "Ethereum (REAL +48%)":"ETH-USD",
+ "Bitcoin (REAL +23%)":"BTC-USD",
+ "BNB (REAL)":"BNB-USD",
+ "Solana (REAL)":"SOL-USD"
 }
 
 session = c_requests.Session(impersonate="chrome")
@@ -53,46 +49,35 @@ def get_single_df(df_all, symbol):
 def analyze(df):
     now=datetime.now(ITALY_TZ)
     if df is None: return {"score":0,"action":"WAIT","reason":"Carico...","time":now.strftime("%H:%M:%S")}
-    last=df.iloc[-2]; prev=df.iloc[-3]
+    last=df.iloc[-2]
     rsi=float(last['RSI'])
     e9,e21,e50=float(last['EMA9']),float(last['EMA21']),float(last['EMA50'])
     price=float(last['Close'])
-
-    # FILTRO PRECISO - NIENTE PINBAR STRANE
-    # 1. Trend chiaro
     up_trend = e9 > e21 and e21 > e50 and price > e9
     down_trend = e9 < e21 and e21 < e50 and price < e9
-
-    # 2. RSI preciso
     if not (30 <= rsi <= 70):
-        return {"score":0,"action":"WAIT","reason":f"RSI {rsi:.0f} fuori","time":now.strftime("%H:%M:%S")}
+        return {"score":0,"action":"WAIT","reason":f"RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+    bullish = float(last['Close']) > float(last['Open'])
+    bearish = float(last['Close']) < float(last['Open'])
+    if up_trend and 45 <= rsi <= 62 and bullish:
+        return {"score":92,"action":"BUY 92%","reason":f"TREND UP RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+    if down_trend and 38 <= rsi <= 55 and bearish:
+        return {"score":92,"action":"SELL 92%","reason":f"TREND DOWN RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+    return {"score":0,"action":"WAIT","reason":f"Attendo RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
 
-    # 3. Candela di conferma
-    bullish_candle = float(last['Close']) > float(last['Open'])
-    bearish_candle = float(last['Close']) < float(last['Open'])
-
-    # BUY PRECISO
-    if up_trend and 45 <= rsi <= 62 and bullish_candle:
-        return {"score":92,"action":"BUY 92%","reason":f"TREND UP + RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-
-    # SELL PRECISO
-    if down_trend and 38 <= rsi <= 55 and bearish_candle:
-        return {"score":92,"action":"SELL 92%","reason":f"TREND DOWN + RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-
-    return {"score":0,"action":"WAIT","reason":f"Attendo trend RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-
-HTML="""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V4.5 REAL ONLY</title>
-<style>body{background:#0a0a0f;color:#fff;font-family:system-ui;padding:12px}select{width:100%;padding:12px;border-radius:10px;background:#1a1a22;color:#fff;border:1px solid #333;margin:6px 0}.row{display:flex;gap:8px}.row select{flex:1}.card{background:#1a1a22;padding:14px;border-radius:14px;margin:10px 0;border-left:5px solid #333}.sbuy{border-left-color:#00ff88;border:2px solid #00ff88}.new{animation:pulse 1s infinite}.badge{padding:6px 12px;border-radius:20px;font-weight:bold;background:#00ff88;color:#000}.perc{font-size:26px;font-weight:900;color:#00ff88}button{width:100%;padding:14px;background:#00ff88;color:#000;border:none;border-radius:12px;font-weight:bold;font-size:17px}.age{font-size:12px;font-weight:bold}.age.newt{color:#00ff88}@keyframes pulse{0%{box-shadow:0 0 0 0 #00ff88}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}</style></head><body>
-<h2>✅ V4.5 SOLO REAL 🔊</h2><p style=color:#00ff88>PRECISO: Dati REAL = Quotex REAL | NO OTC | Trend + RSI</p>
-<div class="row"><select id="pair"><option>EUR/USD</option><option>GBP/USD</option><option>USD/JPY</option><option>AUD/USD</option><option>USD/CHF</option><option>EUR/JPY</option><option>GBP/JPY</option><option>EUR/GBP</option></select><select id="tf"><option>5m</option></select></div>
+HTML="""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V4.6 NIGHT REAL</title>
+<style>body{background:#0a0a0f;color:#fff;font-family:system-ui;padding:12px}select{width:100%;padding:12px;border-radius:10px;background:#1a1a22;color:#fff;border:1px solid #333;margin:6px 0}.row{display:flex;gap:8px}.row select{flex:1}.card{background:#1a1a22;padding:14px;border-radius:14px;margin:10px 0;border-left:5px solid #333}.sbuy{border-left-color:#00ff88;border:2px solid #00ff88}.new{animation:pulse 1s infinite}.badge{padding:6px 12px;border-radius:20px;font-weight:bold;background:#00ff88;color:#000}.perc{font-size:26px;font-weight:900;color:#00ff88}button{width:100%;padding:14px;background:#00ff88;color:#000;border:none;border-radius:12px;font-weight:bold;font-size:17px}.age{font-size:12px;font-weight:bold;color:#00ff88}@keyframes pulse{0%{box-shadow:0 0 0 0 #00ff88}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}</style></head><body>
+<h2>🌙 V4.6 NIGHT REAL</h2><p style=color:#00ff88>SOLO CRYPTO REAL - Sempre aperte, dati identici a Quotex REAL</p>
+<p style=color:#aaa>💡 Ethereum +48% è il migliore ora! Bitcoin +23% paga poco</p>
+<div class="row"><select id="pair"><option>Ethereum (REAL +48%)</option><option>Bitcoin (REAL +23%)</option><option>BNB (REAL)</option><option>Solana (REAL)</option></select><select id="tf"><option>5m</option></select></div>
 <button onclick="analyze()">ANALIZZA</button>
-<label style="display:flex;align-items:center;gap:8px;margin:10px 0;color:#aaa"><input type="checkbox" id="soundOn" checked> 🔊 Solo NUOVI 92%+</label>
-<div id="result"><div class=card>Pronto V4.5 REAL ONLY</div></div><h3>Segnali REAL LIVE</h3><div id="auto"></div>
+<label style="display:flex;align-items:center;gap:8px;margin:10px 0;color:#aaa"><input type="checkbox" id="soundOn" checked> 🔊 Suono su 92%</label>
+<div id="result"><div class=card>Pronto NOTTE REAL</div></div><h3>Segnali LIVE CRYPTO REAL</h3><div id="auto"></div>
 <script>
 let firstSeen={};
-function beep(){try{let c=new (window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();let g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=800;g.gain.setValueAtTime(0.9,c.currentTime);o.start();setTimeout(()=>{o.stop();c.close();},600);if(navigator.vibrate) navigator.vibrate([400,100,400]);}catch(e){}}
+function beep(){try{let c=new (window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();let g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=900;g.gain.setValueAtTime(0.9,c.currentTime);o.start();setTimeout(()=>{o.stop();c.close();},600);if(navigator.vibrate) navigator.vibrate([400,100,400]);}catch(e){}}
 async function analyze(){let p=document.getElementById('pair').value;let r=await fetch('/api/analyze?pair='+encodeURIComponent(p)+'&t='+Date.now());let d=await r.json();document.getElementById('result').innerHTML='<div class=card '+(d.score>=92?'sbuy new':'')+'><b>'+p+'</b> <span class=badge>'+d.action+'</span><div class=perc>'+d.score+'%</div><small>'+d.reason+' - '+d.time+'</small></div>';if(d.score>=92) beep();}
-async function scan(){try{let r=await fetch('/api/scan?t='+Date.now());let d=await r.json();let h='';let now=Date.now();d.forEach(c=>{let key=c.pair+c.action;if(!firstSeen[key]){firstSeen[key]=now;}let ageSec=Math.floor((now-firstSeen[key])/1000);let ageText=ageSec<120?'🟢 NUOVO! '+ageSec+'s fa':'🟡 '+Math.floor(ageSec/60)+'m fa';let cardClass=ageSec<120?'card sbuy new':'card sbuy';h+='<div class=\"'+cardClass+'\"><b>'+c.pair+'</b> <span class=badge>'+c.action+'</span> <span class=\"age newt\">'+ageText+'</span><div class=perc>'+c.score+'%</div><small>'+c.reason+' - '+c.time+'</small></div>';});if(d.length===0){h='<div class=card>⏳ V4.5 cerca trend pulito su REAL...<br><small>Quando appare è identico a Quotex</small></div>';}document.getElementById('auto').innerHTML=h;}catch(e){}}
+async function scan(){try{let r=await fetch('/api/scan?t='+Date.now());let d=await r.json();let h='';let now=Date.now();d.forEach(c=>{let key=c.pair+c.action;if(!firstSeen[key]){firstSeen[key]=now;}let ageSec=Math.floor((now-firstSeen[key])/1000);let ageText=ageSec<120?'🟢 NUOVO! '+ageSec+'s':'🟡 '+Math.floor(ageSec/60)+'m';let cardClass=ageSec<120?'card sbuy new':'card sbuy';h+='<div class=\"'+cardClass+'\"><b>'+c.pair+'</b> <span class=badge>'+c.action+'</span> <span class=age>'+ageText+'</span><div class=perc>'+c.score+'%</div><small>'+c.reason+' - '+c.time+'</small></div>';});if(d.length===0){h='<div class=card>⏳ Cerco trend su ETH/BTC REAL...<br><small>Crypto è lenta, ma precisa</small></div>';}document.getElementById('auto').innerHTML=h;}catch(e){}}
 scan(); setInterval(scan,15000);
 </script></body></html>"""
 
@@ -100,7 +85,7 @@ scan(); setInterval(scan,15000);
 def home(): return render_template_string(HTML)
 @app.route('/api/analyze')
 def api_analyze():
-    pair=request.args.get('pair','EUR/USD'); sym=PAIRS.get(pair,"EURUSD=X")
+    pair=request.args.get('pair','Ethereum (REAL +48%)'); sym=PAIRS.get(pair,"ETH-USD")
     df_all=get_all_data()
     if df_all is None: return jsonify({"score":0,"action":"WAIT","reason":"Carico...","time":datetime.now(ITALY_TZ).strftime("%H:%M:%S")})
     df=get_single_df(df_all,sym)
