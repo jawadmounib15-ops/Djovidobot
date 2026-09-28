@@ -3,3 +3,6 @@ requests
 yfinance
 pandas
 gunicorn
+python-telegram-bot==20.7
+curl_cffi
+pytz
