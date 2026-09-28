@@ -1,4 +1,4 @@
-# bot.py - PIN BAR DOPPIA 5M + 15M - DECIDE LUI SCADENZA
+# bot.py - PIN BAR ULTRA STRETTA - ZERO FALSI
 import os, time, requests, yfinance as yf
 from datetime import datetime, timezone, timedelta
 from flask import Flask
@@ -6,19 +6,18 @@ import threading
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "PIN BAR 5M + 15M OK"
+def home(): return "ULTRA STRETTA OK"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
 ITALY_TZ = timezone(timedelta(hours=2))
 
-BASE = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","USDCHF=X","BTC-USD"]
-LABELS_OTC = ["EUR/USD-OTC","GBP/USD-OTC","USD/JPY-OTC","AUD/USD-OTC","USD/CAD-OTC","EUR/JPY-OTC","USD/CHF-OTC","BTC/USD-OTC"]
-LABELS_REALI = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CAD","EUR/JPY","USD/CHF","BTC/USD"]
+BASE = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","USDCHF=X"]
+LABELS_OTC = ["EUR/USD-OTC","GBP/USD-OTC","USD/JPY-OTC","AUD/USD-OTC","USD/CAD-OTC","EUR/JPY-OTC","USD/CHF-OTC"]
+LABELS_REALI = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CAD","EUR/JPY","USD/CHF"]
 ALL = list(zip(BASE, LABELS_OTC, LABELS_REALI))
 
-LAST={}
-AVVIO=False
+LAST={}; AVVIO=False
 
 def send(m):
     try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"}, timeout=10)
@@ -27,75 +26,83 @@ def send(m):
 def get_df(y, interval, period):
     try:
         df=yf.download(y, period=period, interval=interval, progress=False, auto_adjust=False)
-        if len(df)<30: return None
+        if len(df)<80: return None
         if hasattr(df.columns,'get_level_values'):
             try: df.columns=df.columns.get_level_values(0)
             except: pass
+        c=df['Close']
+        df['EMA21']=c.ewm(21).mean(); df['EMA50']=c.ewm(50).mean(); df['EMA100']=c.ewm(100).mean()
+        df['SMA20']=c.rolling(20).mean(); s=c.rolling(20).std()
+        df['BB_UP']=df['SMA20']+2*s; df['BB_LOW']=df['SMA20']-2*s
+        delta=c.diff(); g=delta.where(delta>0,0).ewm(14).mean(); ls=-delta.where(delta<0,0).ewm(14).mean()
+        df['RSI']=100-(100/(1+g/ls))
         return df
     except: return None
 
-# PINBAR 5 MINUTI = 5 candele da 1m
-def check_5m(y):
+def ultra_pinbar_5m(y):
     df=get_df(y,"1m","2d")
     if df is None: return None
-    last5=df.iloc[-5:]
-    o=float(last5.iloc[0]['Open']); cc=float(last5.iloc[-1]['Close'])
+    last5=df.iloc[-5:]; o=float(last5.iloc[0]['Open']); cc=float(last5.iloc[-1]['Close'])
     h=float(last5['High'].max()); l=float(last5['Low'].min())
     body=abs(cc-o); rng=h-l
-    if rng==0 or body>rng*0.30: return None
+    if rng==0: return None
     up=h-max(o,cc); low=min(o,cc)-l
-    bull=low>2.5*body and low>rng*0.60 and up<rng*0.20
-    bear=up>2.5*body and up>rng*0.60 and low<rng*0.20
-    if bull: return "BUY", int((low/rng)*100)
-    if bear: return "SELL", int((up/rng)*100)
+    last=df.iloc[-1]; ema21=float(last['EMA21']); ema50=float(last['EMA50']); ema100=float(last['EMA100'])
+    rsi=float(last['RSI']); price=cc; bb_low=float(last['BB_LOW']); bb_up=float(last['BB_UP'])
+
+    # ULTRA STRETTA - 7 REGOLE
+    if body > rng*0.18: return None # 1. body <18%
+    if low > rng*0.75 and low > 4*body and up < rng*0.08 and price <= bb_low*1.005 and ema21>ema50 and ema50>ema100 and rsi<35:
+        return "BUY", int((low/rng)*100), rsi
+    if up > rng*0.75 and up > 4*body and low < rng*0.08 and price >= bb_up*0.995 and ema21<ema50 and ema50<ema100 and rsi>65:
+        return "SELL", int((up/rng)*100), rsi
     return None
 
-# PINBAR 15 MINUTI = 1 candela da 15m
-def check_15m(y):
+def ultra_pinbar_15m(y):
     df=get_df(y,"15m","5d")
     if df is None: return None
     c=df.iloc[-1]; o=float(c['Open']); cc=float(c['Close']); h=float(c['High']); l=float(c['Low'])
     body=abs(cc-o); rng=h-l
-    if rng==0 or body>rng*0.25: return None
+    if rng==0 or body>rng*0.15: return None
     up=h-max(o,cc); low=min(o,cc)-l
-    bull=low>3*body and low>rng*0.65 and up<rng*0.15
-    bear=up>3*body and up>rng*0.65 and low<rng*0.15
-    if bull: return "BUY", int((low/rng)*100)
-    if bear: return "SELL", int((up/rng)*100)
+    ema21=float(c['EMA21']); ema50=float(c['EMA50']); ema100=float(c['EMA100'])
+    rsi=float(c['RSI']); bb_low=float(c['BB_LOW']); bb_up=float(c['BB_UP'])
+
+    if low>rng*0.78 and low>4.5*body and up<rng*0.06 and cc<=bb_low*1.01 and ema21>ema50 and rsi<38:
+        return "BUY", int((low/rng)*100), rsi
+    if up>rng*0.78 and up>4.5*body and low<rng*0.06 and cc>=bb_up*0.99 and ema21<ema50 and rsi>62:
+        return "SELL", int((up/rng)*100), rsi
     return None
 
 def bot_loop():
     global AVVIO
     if not AVVIO:
-        send(f"✅ *PIN BAR 5M + 15M ATTIVA*\nBot decide scadenza da solo\nOTC + REALI\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
+        send(f"✅ *ULTRA STRETTA ATTIVA*\nBody<18% Wick>75% + BB + EMA + RSI\nFalsi = 0\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
         AVVIO=True
     while True:
         try:
             for base, otc, reali in ALL:
                 now=datetime.now(ITALY_TZ)
-                # CONTROLLO 5M
-                sec_5m = (5-now.minute%5)*60-now.second
-                if 20 <= sec_5m <= 110:
-                    res5 = check_5m(base)
-                    if res5:
-                        dir5, perc5 = res5
-                        for label in [otc, reali]:
-                            key=f"{label}_5M_{dir5}"
-                            if key in LAST and time.time()-LAST[key]<300: continue
-                            msg=f"📌 *PIN BAR 5M*\n{label}\n{'🟢 BUY 5M' if dir5=='BUY' else '🔴 SELL 5M'}\nWick {perc5}% | {sec_5m}s mancanti\n⏰ {now.strftime('%H:%M:%S')} ITALIA\nDecide bot: scadenza 5M"
-                            send(msg); LAST[key]=time.time()
+                sec=(5-now.minute%5)*60-now.second
+                if 15<=sec<=90:
+                    r=ultra_pinbar_5m(base)
+                    if r:
+                        d,p,rs=r
+                        for lab in [otc,reali]:
+                            k=f"{lab}_5M_{d}_ULTRA"
+                            if k in LAST and time.time()-LAST[k]<600: continue
+                            msg=f"💎 *ULTRA 5M*\n{lab}\n{'🟢 BUY 5M' if d=='BUY' else '🔴 SELL 5M'}\nWick {p}% | RSI {rs:.0f} | BB touch\n⏰ {now.strftime('%H:%M:%S')} ITALIA"
+                            send(msg); LAST[k]=time.time()
 
-                # CONTROLLO 15M
-                min_left_15 = 15 - (now.minute % 15)
-                if min_left_15 <= 3: # ultimi 3 min del 15M
-                    res15 = check_15m(base)
-                    if res15:
-                        dir15, perc15 = res15
-                        for label in [otc, reali]:
-                            key=f"{label}_15M_{dir15}"
-                            if key in LAST and time.time()-LAST[key]<900: continue
-                            msg=f"📌📌 *PIN BAR 15M SICURA* 📌📌\n{label}\n{'🟢 BUY 15M' if dir15=='BUY' else '🔴 SELL 15M'}\nWick {perc15}% perfetta\n⏰ {now.strftime('%H:%M:%S')} ITALIA\nDecide bot: scadenza 15M PIU SICURA"
-                            send(msg); LAST[key]=time.time()
+                if 15-(now.minute%15) <= 2:
+                    r=ultra_pinbar_15m(base)
+                    if r:
+                        d,p,rs=r
+                        for lab in [otc,reali]:
+                            k=f"{lab}_15M_{d}_ULTRA"
+                            if k in LAST and time.time()-LAST[k]<1200: continue
+                            msg=f"💎💎 *ULTRA 15M SICURISSIMA*\n{lab}\n{'🟢 BUY 15M' if d=='BUY' else '🔴 SELL 15M'}\nWick {p}% | RSI {rs:.0f} | BB\n⏰ {now.strftime('%H:%M:%S')} ITALIA"
+                            send(msg); LAST[k]=time.time()
                 time.sleep(0.8)
             time.sleep(3)
         except Exception as e:
