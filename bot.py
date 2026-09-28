@@ -1,4 +1,4 @@
-# bot.py - MEDIO STRETTO TREND + CONTRARIO
+# bot.py - MEDIO STRETTO + CONTRARIO
 import os, time, requests, yfinance as yf
 from datetime import datetime, timezone, timedelta
 from flask import Flask
@@ -6,7 +6,7 @@ import threading
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "MEDIO CONTRARIO OK"
+def home(): return "MEDIO STRETTO+ CONTRARIO OK"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
@@ -36,7 +36,7 @@ def get_df(y, interval, period):
         return df
     except: return None
 
-def check_medio_contrario(y):
+def check_medio_piu_contrario(y):
     df5 = get_df(y,"5m","5d")
     df15 = get_df(y,"15m","10d")
     if df5 is None or df15 is None: return None
@@ -49,57 +49,64 @@ def check_medio_contrario(y):
     wick = max(upper, lower)
     nose = min(upper, lower)
 
-    # --- MEDIO STRETTO ---
-    if wick < rng*0.60: return None # medio: 60%
-    if body > rng*0.32: return None # medio: 32%
-    if nose > rng*0.20: return None # medio: 20%
-    if wick < body*2.0: return None
+    # --- STRETTO UN PELO IN PIU ---
+    if wick < rng*0.65: return None # era 60% ora 65%
+    if body > rng*0.28: return None # era 32% ora 28%
+    if nose > rng*0.15: return None # era 20% ora 15%
+    if wick < body*2.2: return None # era 2.0 ora 2.2x
 
-    # --- SOLO TREND MEDIO STRETTO ---
+    # Sporgenza minima per non prendere pinbar in mezzo al nulla
+    prev_low = df5['Low'].iloc[-10:-1].min()
+    prev_high = df5['High'].iloc[-10:-1].max()
+    if lower==wick and l > prev_low*0.9995: return None
+    if upper==wick and h < prev_high*1.0005: return None
+
+    # --- TREND MEDIO-STRETTO+ ---
     ema21_5 = float(df5['EMA21'].iloc[-1])
     ema50_5 = float(df5['EMA50'].iloc[-1])
     ema21_15 = float(df15['EMA21'].iloc[-1])
     ema50_15 = float(df15['EMA50'].iloc[-1])
 
-    # Trend deve essere chiaro su 5m + 15m (medio stretto)
+    # Distanza tra EMA21 e EMA50 deve essere almeno 0.05% per essere trend vero, non piatto
+    dist_5 = abs(ema21_5-ema50_5)/cc
+    dist_15 = abs(ema21_15-ema50_15)/cc
+    if dist_5 < 0.0004 or dist_15 < 0.0004: return None # trend troppo piatto = scarta
+
     trend_up = ema21_5 > ema50_5 and ema21_15 > ema50_15 and cc > ema21_5
     trend_down = ema21_5 < ema50_5 and ema21_15 < ema50_15 and cc < ema21_5
 
     if not (trend_up or trend_down): return None
 
-    # --- ROVINATO: TUTTO AL CONTRARIO ---
-    # Se trend UP + pinbar BULLISH (lower wick) = dovrebbe essere BUY, noi diamo SELL
-    # Se trend DOWN + pinbar BEARISH (upper wick) = dovrebbe essere SELL, noi diamo BUY
-
+    # --- CONTRARIO COME VOLEVI ---
     if lower == wick and trend_up:
-        return "SELL", int((wick/rng)*100), f"TREND UP FORTE MA CONTRARIO SELL"
+        return "SELL", int((wick/rng)*100), f"TREND UP MA CONTRARIO SELL"
 
     if upper == wick and trend_down:
-        return "BUY", int((wick/rng)*100), f"TREND DOWN FORTE MA CONTRARIO BUY"
+        return "BUY", int((wick/rng)*100), f"TREND DOWN MA CONTRARIO BUY"
 
     return None
 
 def bot_loop():
     global AVVIO
     if not AVVIO:
-        send(f"⚠️ *MEDIO STRETTO CONTRARIO*\nTrend 5m+15m filtrato\nWick>60% Body<32%\nTUTTI I SEGNALI INVERTITI\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
+        send(f"⚠️ *MEDIO STRETTO+ CONTRARIO*\nWick>65% Body<28% Nose<15% 2.2x\nTrend forte 5m+15m\nTUTTO INVERTITO\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
         AVVIO=True
     while True:
         try:
             for base, otc, reali in ALL:
                 now=datetime.now(ITALY_TZ)
                 sec=(5-now.minute%5)*60-now.second
-                if not 15 <= sec <= 110: continue
+                if not 20 <= sec <= 100: continue
 
-                res = check_medio_contrario(base)
+                res = check_medio_piu_contrario(base)
                 if not res: continue
                 direction, perc, motivo = res
 
                 for label in [otc, reali]:
-                    key=f"{label}_{direction}_MEDCONT"
-                    if key in LAST and time.time()-LAST[key]<300: continue
+                    key=f"{label}_{direction}_MEDPIU"
+                    if key in LAST and time.time()-LAST[key]<350: continue
 
-                    msg=f"🔄 *MEDIO CONTRARIO*\n{label}\n{'🟢 BUY 5M' if direction=='BUY' else '🔴 SELL 5M'}\nWick {perc}% | {motivo}\n⏰ {now.strftime('%H:%M:%S')} ITALIA"
+                    msg=f"🔄 *MEDIO+ CONTRARIO*\n{label}\n{'🟢 BUY 5M' if direction=='BUY' else '🔴 SELL 5M'}\nWick {perc}% | {motivo}\n⏰ {now.strftime('%H:%M:%S')} ITALIA"
                     send(msg); LAST[key]=time.time()
                 time.sleep(0.7)
             time.sleep(3)
