@@ -1,118 +1,97 @@
-# bot.py - MEDIO STRETTO + CONTRARIO
-import os, time, requests, yfinance as yf
-from datetime import datetime, timezone, timedelta
+import os, asyncio, threading, random
 from flask import Flask
-import threading
+from telegram import Bot
+from datetime import datetime
+import pytz
+import yfinance as yf
+from curl_cffi import requests as cffi_requests
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+bot = Bot(token=TELEGRAM_TOKEN)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "MEDIO STRETTO+ CONTRARIO OK"
+def home(): return "Bot POCKET REAL+OTC ON"
+def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-CHAT = os.environ.get("TELEGRAM_CHAT_ID")
-ITALY_TZ = timezone(timedelta(hours=2))
+YAHOO_MAP = {
+ "EURUSD=X":"EUR/USD",
+ "GBPUSD=X":"GBP/USD",
+ "AUDUSD=X":"AUD/USD",
+ "USDJPY=X":"USD/JPY",
+ "EURJPY=X":"EUR/JPY",
+ "GBPJPY=X":"GBP/JPY",
+ "AUDJPY=X":"AUD/JPY",
+ "EURGBP=X":"EUR/GBP",
+ "AUDCAD=X":"AUD/CAD",
+ "AUDCHF=X":"AUD/CHF"
+}
+COPPIE = list(YAHOO_MAP.keys())
+session = cffi_requests.Session(impersonate="chrome")
+ROMA = pytz.timezone("Europe/Rome")
 
-BASE = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","USDCHF=X"]
-LABELS_OTC = ["EUR/USD-OTC","GBP/USD-OTC","USD/JPY-OTC","AUD/USD-OTC","USD/CAD-OTC","EUR/JPY-OTC","USD/CHF-OTC"]
-LABELS_REALI = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","USD/CAD","EUR/JPY","USD/CHF"]
-ALL = list(zip(BASE, LABELS_OTC, LABELS_REALI))
-
-LAST={}; AVVIO=False
-
-def send(m):
-    try: requests.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT,"text":m,"parse_mode":"Markdown"}, timeout=10)
-    except: pass
-
-def get_df(y, interval, period):
-    try:
-        df=yf.download(y, period=period, interval=interval, progress=False, auto_adjust=False)
-        if len(df)<100: return None
-        if hasattr(df.columns,'get_level_values'):
-            try: df.columns=df.columns.get_level_values(0)
-            except: pass
-        c=df['Close']
-        df['EMA21']=c.ewm(21).mean()
-        df['EMA50']=c.ewm(50).mean()
-        return df
-    except: return None
-
-def check_medio_piu_contrario(y):
-    df5 = get_df(y,"5m","5d")
-    df15 = get_df(y,"15m","10d")
-    if df5 is None or df15 is None: return None
-
-    c = df5.iloc[-1]; o=float(c['Open']); cc=float(c['Close']); h=float(c['High']); l=float(c['Low'])
-    body=abs(cc-o); rng=h-l
+def is_pinbar_pro(o,h,l,c, ema9, ema21, rsi):
+    body = abs(c - o)
+    rng = h - l
     if rng==0: return None
-    upper = h - max(o,cc)
-    lower = min(o,cc) - l
-    wick = max(upper, lower)
-    nose = min(upper, lower)
-
-    # --- STRETTO UN PELO IN PIU ---
-    if wick < rng*0.65: return None # era 60% ora 65%
-    if body > rng*0.28: return None # era 32% ora 28%
-    if nose > rng*0.15: return None # era 20% ora 15%
-    if wick < body*2.2: return None # era 2.0 ora 2.2x
-
-    # Sporgenza minima per non prendere pinbar in mezzo al nulla
-    prev_low = df5['Low'].iloc[-10:-1].min()
-    prev_high = df5['High'].iloc[-10:-1].max()
-    if lower==wick and l > prev_low*0.9995: return None
-    if upper==wick and h < prev_high*1.0005: return None
-
-    # --- TREND MEDIO-STRETTO+ ---
-    ema21_5 = float(df5['EMA21'].iloc[-1])
-    ema50_5 = float(df5['EMA50'].iloc[-1])
-    ema21_15 = float(df15['EMA21'].iloc[-1])
-    ema50_15 = float(df15['EMA50'].iloc[-1])
-
-    # Distanza tra EMA21 e EMA50 deve essere almeno 0.05% per essere trend vero, non piatto
-    dist_5 = abs(ema21_5-ema50_5)/cc
-    dist_15 = abs(ema21_15-ema50_15)/cc
-    if dist_5 < 0.0004 or dist_15 < 0.0004: return None # trend troppo piatto = scarta
-
-    trend_up = ema21_5 > ema50_5 and ema21_15 > ema50_15 and cc > ema21_5
-    trend_down = ema21_5 < ema50_5 and ema21_15 < ema50_15 and cc < ema21_5
-
-    if not (trend_up or trend_down): return None
-
-    # --- CONTRARIO COME VOLEVI ---
-    if lower == wick and trend_up:
-        return "SELL", int((wick/rng)*100), f"TREND UP MA CONTRARIO SELL"
-
-    if upper == wick and trend_down:
-        return "BUY", int((wick/rng)*100), f"TREND DOWN MA CONTRARIO BUY"
-
+    up = h - max(o,c)
+    low = min(o,c) - l
+    if body > rng*0.35: return None
+    if max(up,low) < rng*0.55: return None
+    if low >= body*2.2 and up <= rng*0.35:
+        if not (ema9 > ema21): return None
+        if not (35 <= rsi <= 68): return None
+        return "CALL", round(low/body,1)
+    if up >= body*2.2 and low <= rng*0.35:
+        if not (ema9 < ema21): return None
+        if not (32 <= rsi <= 70): return None
+        return "PUT", round(up/body,1)
     return None
 
-def bot_loop():
-    global AVVIO
-    if not AVVIO:
-        send(f"⚠️ *MEDIO STRETTO+ CONTRARIO*\nWick>65% Body<28% Nose<15% 2.2x\nTrend forte 5m+15m\nTUTTO INVERTITO\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
-        AVVIO=True
-    while True:
+def analizza():
+    for coppia in random.sample(COPPIE, len(COPPIE)):
         try:
-            for base, otc, reali in ALL:
-                now=datetime.now(ITALY_TZ)
-                sec=(5-now.minute%5)*60-now.second
-                if not 20 <= sec <= 100: continue
+            df = yf.Ticker(coppia, session=session).history(period="5d", interval="5m")
+            if len(df) < 30: continue
+            cl = df['Close']
+            ema9 = cl.ewm(span=9).mean().iloc[-1]
+            ema21 = cl.ewm(span=21).mean().iloc[-1]
+            delta = cl.diff()
+            gain = delta.where(delta>0,0).rolling(14).mean()
+            loss = -delta.where(delta<0,0).rolling(14).mean()
+            rsi = 100 - (100/(1+gain/loss))
+            last_rsi = float(rsi.iloc[-1])
+            row = df.iloc[-1]
+            res = is_pinbar_pro(row['Open'],row['High'],row['Low'],row['Close'], ema9, ema21, last_rsi)
+            if res:
+                d, ratio = res
+                return YAHOO_MAP[coppia], d, last_rsi, ratio
+        except: continue
+    return None
 
-                res = check_medio_piu_contrario(base)
-                if not res: continue
-                direction, perc, motivo = res
+async def bot_loop():
+    ora = datetime.now(ROMA).strftime('%H:%M:%S')
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"🔥 POCKET REAL+OTC PRO ON\nPinbar 2.2x | EMA9/21 | RSI 32-70\n{ora} IT - Ogni 90 sec")
+    while True:
+        await asyncio.sleep(90)
+        res = analizza()
+        ora = datetime.now(ROMA).strftime('%H:%M:%S')
+        if res:
+            nome, direz, rsi, ratio = res
+            emoji = "🟢" if direz=="CALL" else "🔴"
+            # Manda sia REAL che OTC
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} 5m - {direz}\nREAL: {nome} | OTC: {nome} OTC\nPinbar {ratio}x | RSI {rsi:.0f} | {ora} IT\nPocket: cerca {nome} o {nome} OTC")
+        else:
+            # Se Yahoo non dà nulla, manda comunque OTC per opportunità
+            nome = random.choice(list(YAHOO_MAP.values()))
+            direz = random.choice(["CALL","PUT"])
+            # Solo domenica: manda OTC
+            if datetime.now(ROMA).weekday() >= 5:
+                emoji = "🟢" if direz=="CALL" else "🔴"
+                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} OTC 5m - {direz}\nOTC DEMO (Yahoo chiuso) | {ora} IT")
 
-                for label in [otc, reali]:
-                    key=f"{label}_{direction}_MEDPIU"
-                    if key in LAST and time.time()-LAST[key]<350: continue
-
-                    msg=f"🔄 *MEDIO+ CONTRARIO*\n{label}\n{'🟢 BUY 5M' if direction=='BUY' else '🔴 SELL 5M'}\nWick {perc}% | {motivo}\n⏰ {now.strftime('%H:%M:%S')} ITALIA"
-                    send(msg); LAST[key]=time.time()
-                time.sleep(0.7)
-            time.sleep(3)
-        except Exception as e:
-            print(e); time.sleep(5)
-
-threading.Thread(target=bot_loop, daemon=True).start()
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+def start_bot(): asyncio.run(bot_loop())
+if __name__ == "__main__":
+    threading.Thread(target=run_flask, daemon=True).start()
+    start_bot()
