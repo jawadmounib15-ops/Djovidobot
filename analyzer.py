@@ -18,6 +18,7 @@ PAIRS = {
 }
 session = c_requests.Session(impersonate="chrome")
 CACHE = {"data": None, "time": 0}
+FIRST_SEEN = {}
 
 def get_all_data():
     now = time.time()
@@ -40,7 +41,7 @@ def get_single_df(df_all, symbol):
         else: df = df_all
         if df is None or len(df)<60: return None
         c=df['Close']; df=df.copy()
-        df['EMA9']=c.ewm(9).mean(); df['EMA21']=c.ewm(21).mean(); df['EMA50']=c.ewm(50).mean(); df['EMA100']=c.ewm(100).mean()
+        df['EMA9']=c.ewm(9).mean(); df['EMA21']=c.ewm(21).mean(); df['EMA50']=c.ewm(50).mean()
         delta=c.diff(); gain=delta.where(delta>0,0).rolling(14).mean(); loss=-delta.where(delta<0,0).rolling(14).mean()
         df['RSI']=100-(100/(1+gain/loss))
         return df
@@ -48,65 +49,37 @@ def get_single_df(df_all, symbol):
 
 def job1_pinbar(o,h,l,c):
     body=abs(c-o); rng=h-l
-    if rng==0 or body<rng*0.06 or body>rng*0.45: return None
+    if rng==0 or body<rng*0.08 or body>rng*0.42: return None
     upper=h-max(o,c); lower=min(o,c)-l
-    if lower>=body*1.8 and lower>=rng*0.45 and upper<=rng*0.35:
+    if lower>=body*2.0 and lower>=rng*0.50 and upper<=rng*0.30:
         r=lower/body
-        if 1.8 <= r <= 4.2: return "CALL", round(r,1)
-    if upper>=body*1.8 and upper>=rng*0.45 and lower<=rng*0.35:
+        if 2.0 <= r <= 4.0: return "CALL", round(r,1)
+    if upper>=body*2.0 and upper>=rng*0.50 and lower<=rng*0.30:
         r=upper/body
-        if 1.8 <= r <= 4.2: return "PUT", round(r,1)
+        if 2.0 <= r <= 4.0: return "PUT", round(r,1)
     return None
 
 def job2_engulfing(df):
-    # candela 2 mangia candela 1
     p1=df.iloc[-3]; p2=df.iloc[-2]
     o1,c1=p1['Open'],p1['Close']; o2,c2=p2['Open'],p2['Close']
-    # bullish engulfing
-    if c1<o1 and c2>o2 and o2<=c1 and c2>=o1 and abs(c2-o2) > abs(c1-o1)*1.2:
-        if c2>o1 and p2['High']-p2['Low'] < abs(c2-o2)*1.5: # no ombra 7x
+    if c1<o1 and c2>o2 and o2<=c1 and c2>=o1 and abs(c2-o2) > abs(c1-o1)*1.3:
+        if p2['High']-p2['Low'] < abs(c2-o2)*1.6:
             return "CALL", "Engulf BULL"
-    if c1>o1 and c2<o2 and o2>=c1 and c2<=o1 and abs(c2-o2) > abs(c1-o1)*1.2:
-        if p2['High']-p2['Low'] < abs(c2-o2)*1.5:
+    if c1>o1 and c2<o2 and o2>=c1 and c2<=o1 and abs(c2-o2) > abs(c1-o1)*1.3:
+        if p2['High']-p2['Low'] < abs(c2-o2)*1.6:
             return "PUT", "Engulf BEAR"
     return None
 
 def job3_ema50_bounce(df):
-    last=df.iloc[-2]; prev=df.iloc[-3]
+    last=df.iloc[-2]
     price=float(last['Close']); ema50=float(last['EMA50'])
     o,h,l,c = float(last['Open']),float(last['High']),float(last['Low']),price
     body=abs(c-o); rng=h-l
     if rng==0: return None
-    # vicino a EMA50 entro 0.15%
-    if abs(price-ema50)/price > 0.0015: return None
-    if rng > body*4.5: return None # anti 7x
-    if price>ema50 and (min(o,c)-l) >= body*1.2: return "CALL", "Bounce EMA50"
-    if price<ema50 and (h-max(o,c)) >= body*1.2: return "PUT", "Bounce EMA50"
-    return None
-
-def job4_double_push(df):
-    # 2 candele stesso colore + 3a opposta forte
-    c1=df.iloc[-4]; c2=df.iloc[-3]; c3=df.iloc[-2]
-    if c1['Close']<c1['Open'] and c2['Close']<c2['Open'] and c3['Close']>c3['Open']:
-        if c3['Close'] > max(c1['Open'],c2['Open']):
-            rng=c3['High']-c3['Low']
-            if rng < abs(c3['Close']-c3['Open'])*2.0:
-                return "CALL", "Double Push UP"
-    if c1['Close']>c1['Open'] and c2['Close']>c2['Open'] and c3['Close']<c3['Open']:
-        if c3['Close'] < min(c1['Open'],c2['Open']):
-            rng=c3['High']-c3['Low']
-            if rng < abs(c3['Close']-c3['Open'])*2.0:
-                return "PUT", "Double Push DOWN"
-    return None
-
-def job5_break_retest(df):
-    last=df.iloc[-2]
-    highs=df['High'].iloc[-21:-1].max(); lows=df['Low'].iloc[-21:-1].min()
-    c=float(last['Close']); o=float(last['Open'])
-    rng=float(last['High']-last['Low']); body=abs(c-o)
-    if rng > body*3.5: return None
-    if c > highs*0.9995 and c>o and body>rng*0.55: return "CALL", "Break High"
-    if c < lows*1.0005 and c<o and body>rng*0.55: return "PUT", "Break Low"
+    if abs(price-ema50)/price > 0.0010: return None
+    if rng > body*4.0: return None
+    if price>ema50 and (min(o,c)-l) >= body*1.4: return "CALL", "Bounce EMA50"
+    if price<ema50 and (h-max(o,c)) >= body*1.4: return "PUT", "Bounce EMA50"
     return None
 
 def analyze(df):
@@ -117,54 +90,59 @@ def analyze(df):
     price=float(last['Close'])
     up = e9>e21 and price>e50
     down = e9<e21 and price<e50
-    # RSI comune a tutti i lavori - largo ma sicuro
-    if not (32 <= rsi <= 68):
+    if not (35 <= rsi <= 65):
         return {"score":0,"action":"WAIT","reason":f"RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
 
-    # CATENA DI LAVORI
     j1=job1_pinbar(float(last['Open']),float(last['High']),float(last['Low']),price)
     if j1:
         d,r=j1
         if (d=="CALL" and up) or (d=="PUT" and down):
-            return {"score":92,"action":f"{'BUY' if d=='CALL' else 'SELL'} 92%","reason":f"JOB1 Pinbar {r}x RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+            return {"score":93,"action":f"{'BUY' if d=='CALL' else 'SELL'} 93%","reason":f"JOB1 Pinbar {r}x","time":now.strftime("%H:%M:%S")}
 
     j2=job2_engulfing(df)
     if j2:
         d,r=j2
         if (d=="CALL" and price>e50) or (d=="PUT" and price<e50):
-            return {"score":88,"action":f"{'BUY' if d=='CALL' else 'SELL'} 88%","reason":f"JOB2 {r} RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+            return {"score":88,"action":f"{'BUY' if d=='CALL' else 'SELL'} 88%","reason":f"JOB2 {r}","time":now.strftime("%H:%M:%S")}
 
     j3=job3_ema50_bounce(df)
     if j3:
         d,r=j3
         if (d=="CALL" and up) or (d=="PUT" and down):
-            return {"score":86,"action":f"{'BUY' if d=='CALL' else 'SELL'} 86%","reason":f"JOB3 {r} RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+            return {"score":87,"action":f"{'BUY' if d=='CALL' else 'SELL'} 87%","reason":f"JOB3 {r}","time":now.strftime("%H:%M:%S")}
 
-    j4=job4_double_push(df)
-    if j4:
-        d,r=j4
-        return {"score":85,"action":f"{'BUY' if d=='CALL' else 'SELL'} 85%","reason":f"JOB4 {r} RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+    return {"score":0,"action":"WAIT","reason":f"3 jobs ok RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
 
-    j5=job5_break_retest(df)
-    if j5:
-        d,r=j5
-        if (d=="CALL" and up) or (d=="PUT" and down):
-            return {"score":85,"action":f"{'BUY' if d=='CALL' else 'SELL'} 85%","reason":f"JOB5 {r} RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-
-    return {"score":0,"action":"WAIT","reason":f"5 jobs checked RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-
-HTML="""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V4.0 5 JOBS</title>
-<style>body{background:#0a0a0f;color:#fff;font-family:system-ui;padding:12px}select{width:100%;padding:12px;border-radius:10px;background:#1a1a22;color:#fff;border:1px solid #333;margin:6px 0}.row{display:flex;gap:8px}.row select{flex:1}.card{background:#1a1a22;padding:14px;border-radius:14px;margin:10px 0;border-left:5px solid #333}.sbuy{border-left-color:gold;border:2px solid gold;animation:pulse 1s infinite}.badge{padding:6px 12px;border-radius:20px;font-weight:bold;background:gold;color:#000}.perc{font-size:26px;font-weight:900;color:gold}button{width:100%;padding:14px;background:gold;color:#000;border:none;border-radius:12px;font-weight:bold;font-size:17px}@keyframes pulse{0%{box-shadow:0 0 0 0 gold}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}</style></head><body>
-<h2>⚡ V4.0 5 LAVORI CATENA 🔊</h2><p style=color:#0f0>20 coppie - 5 lavori sicuri - Se non c'è 1 arriva altro</p>
+HTML="""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V4.2 STRETTO</title>
+<style>body{background:#0a0a0f;color:#fff;font-family:system-ui;padding:12px}select{width:100%;padding:12px;border-radius:10px;background:#1a1a22;color:#fff;border:1px solid #333;margin:6px 0}.row{display:flex;gap:8px}.row select{flex:1}.card{background:#1a1a22;padding:14px;border-radius:14px;margin:10px 0;border-left:5px solid #333}.sbuy{border-left-color:gold;border:2px solid gold}.new{animation:pulse 1s infinite;box-shadow:0 0 12px gold}.badge{padding:6px 12px;border-radius:20px;font-weight:bold;background:gold;color:#000}.perc{font-size:26px;font-weight:900;color:gold}button{width:100%;padding:14px;background:gold;color:#000;border:none;border-radius:12px;font-weight:bold;font-size:17px}.age{font-size:12px;font-weight:bold}.age.newt{color:#00ff88}.age.old{color:#888}@keyframes pulse{0%{box-shadow:0 0 0 0 gold}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}</style></head><body>
+<h2>⚡ V4.2 STRETTO UN PELO 🔊</h2><p style=color:#0f0>3 lavori sicuri - Anti 7x - Orario nuovo/vecchio</p>
 <div class="row"><select id="pair"><option>EUR/USD-OTC</option><option>USD/CAD-OTC</option><option>USD/JPY-OTC</option><option>GBP/USD-OTC</option><option>EUR/JPY-OTC</option><option>AUD/CAD-OTC</option><option>GBP/JPY-OTC</option><option>EUR/GBP-OTC</option><option>AUD/USD-OTC</option><option>USD/CHF-OTC</option><option>EUR/AUD-OTC</option><option>GBP/AUD-OTC</option><option>EUR/CAD-OTC</option><option>NZD/USD-OTC</option><option>GBP/CAD-OTC</option><option>SOL/USD-OTC</option><option>BTC/USD-OTC</option><option>ETH/USD-OTC</option><option>EUR/USD</option><option>GBP/USD</option></select><select id="tf"><option>5m</option></select></div>
 <button onclick="analyze()">ANALIZZA</button>
-<label style="display:flex;align-items:center;gap:8px;margin:10px 0;color:#aaa"><input type="checkbox" id="soundOn" checked> 🔊 Suono ON 85%+</label>
-<div id="result"><div class=card>Pronto - V4.0 5 lavori</div></div><h3>Segnali 85%+ LIVE (tutti i lavori)</h3><div id="auto"></div>
+<label style="display:flex;align-items:center;gap:8px;margin:10px 0;color:#aaa"><input type="checkbox" id="soundOn" checked> 🔊 Solo NUOVI</label>
+<div id="result"><div class=card>Pronto V4.2 stretto</div></div><h3>Segnali LIVE</h3><div id="auto"></div>
 <script>
-let lastS=new Set();
-function beep(){try{let c=new (window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();let g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=880;g.gain.setValueAtTime(0.8,c.currentTime);o.start();setTimeout(()=>{o.stop();c.close();},400);if(navigator.vibrate) navigator.vibrate([250,100,250]);}catch(e){}}
-async function analyze(){let p=document.getElementById('pair').value;let r=await fetch('/api/analyze?pair='+encodeURIComponent(p)+'&t='+Date.now());let d=await r.json();document.getElementById('result').innerHTML='<div class=card '+(d.score>=85?'sbuy':'')+'><b>'+p+'</b> <span class=badge>'+d.action+'</span><div class=perc>'+d.score+'%</div><small>'+d.reason+' - '+d.time+'</small></div>';if(d.score>=85) beep();}
-async function scan(){try{let r=await fetch('/api/scan?t='+Date.now());let d=await r.json();let h='';let nf=false;let cur=new Set();d.forEach(c=>{let k=c.pair+c.action;cur.add(k);if(!lastS.has(k)) nf=true;h+='<div class=card sbuy><b>'+c.pair+'</b> <span class=badge>'+c.action+'</span><div class=perc>'+c.score+'%</div><small>'+c.reason+'</small></div>'});if(nf && lastS.size>0 && document.getElementById('soundOn').checked) beep();lastS=cur;if(d.length==0) h='<div class=card>⏳ Scansiono 5 lavori su 20 mercati...</div>';document.getElementById('auto').innerHTML=h;}catch(e){}}
+let firstSeen={};
+function beep(){try{let c=new (window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();let g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=880;g.gain.setValueAtTime(0.8,c.currentTime);o.start();setTimeout(()=>{o.stop();c.close();},400);if(navigator.vibrate) navigator.vibrate([300,100,300]);}catch(e){}}
+async function analyze(){let p=document.getElementById('pair').value;let r=await fetch('/api/analyze?pair='+encodeURIComponent(p)+'&t='+Date.now());let d=await r.json();document.getElementById('result').innerHTML='<div class=card '+(d.score>=85?'sbuy new':'')+'><b>'+p+'</b> <span class=badge>'+d.action+'</span><div class=perc>'+d.score+'%</div><small>'+d.reason+' - '+d.time+'</small></div>';if(d.score>=85) beep();}
+async function scan(){try{let r=await fetch('/api/scan?t='+Date.now());let d=await r.json();let h='';let now=Date.now();let newFound=false;
+d.forEach(c=>{
+ let key=c.pair+c.action;
+ if(!firstSeen[key]){firstSeen[key]=now; newFound=true; c.isNew=true;}
+ let ageSec=Math.floor((now-firstSeen[key])/1000);
+ let ageMin=Math.floor(ageSec/60);
+ let ageText, ageClass, cardClass='card sbuy';
+ if(ageSec<120){ageText='🟢 NUOVO! '+ageSec+'s fa'; ageClass='age newt'; cardClass='card sbuy new';}
+ else if(ageSec<600){ageText='🟡 '+ageMin+' min fa'; ageClass='age newt';}
+ else {ageText='⚪ Vecchio '+ageMin+'m fa'; ageClass='age old';}
+ h+='<div class=\"'+cardClass+'\"><b>'+c.pair+'</b> <span class=badge>'+c.action+'</span> <span class=\"'+ageClass+'\">'+ageText+'</span><div class=perc>'+c.score+'%</div><small>'+c.reason+' - '+c.time+'</small></div>';
+});
+if(newFound && Object.keys(firstSeen).length>d.length && document.getElementById('soundOn').checked) beep();
+else if(newFound && document.getElementById('soundOn').checked && d.length>0){
+ // primo giro beep se nuovo
+ if(Object.keys(firstSeen).length===d.length) { /* primo load no beep */ } else beep();
+}
+if(d.length===0){h='<div class=card>⏳ Nessun segnale - scansiono 3 lavori sicuri...</div>'; firstSeen={};}
+document.getElementById('auto').innerHTML=h;}catch(e){}}
 scan(); setInterval(scan,15000);
 </script></body></html>"""
 
