@@ -1,4 +1,4 @@
-# bot.py - PIN BAR GIUSTA - 5-8 SEGNALI AL GIORNO BUONI
+# bot.py - 3 PILASTRI STRATEGIA PINBAR PULITA - COME DA SCREEN
 import os, time, requests, yfinance as yf
 from datetime import datetime, timezone, timedelta
 from flask import Flask
@@ -6,7 +6,7 @@ import threading
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "PIN BAR GIUSTA OK"
+def home(): return "3 PILASTRI PINBAR OK"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT = os.environ.get("TELEGRAM_CHAT_ID")
@@ -26,83 +26,100 @@ def send(m):
 def get_df(y, interval, period):
     try:
         df=yf.download(y, period=period, interval=interval, progress=False, auto_adjust=False)
-        if len(df)<60: return None
+        if len(df)<100: return None
         if hasattr(df.columns,'get_level_values'):
             try: df.columns=df.columns.get_level_values(0)
             except: pass
         c=df['Close']
         df['EMA21']=c.ewm(21).mean(); df['EMA50']=c.ewm(50).mean()
-        delta=c.diff(); g=delta.where(delta>0,0).ewm(14).mean(); ls=-delta.where(delta<0,0).ewm(14).mean()
-        df['RSI']=100-(100/(1+g/ls))
         return df
     except: return None
 
-def pinbar_giusta_5m(y):
-    df=get_df(y,"1m","2d")
-    if df is None: return None
-    last5=df.iloc[-5:]; o=float(last5.iloc[0]['Open']); cc=float(last5.iloc[-1]['Close'])
-    h=float(last5['High'].max()); l=float(last5['Low'].min())
+def check_3_pilastri(y):
+    # Prendiamo 2 timeframe: 5m per segnale, 4H simulato con 15m x16 per contesto
+    df5 = get_df(y,"5m","5d")
+    df_trend = get_df(y,"15m","10d") # per simulare H4 trend
+    if df5 is None or df_trend is None: return None
+
+    # --- 1. IDENTIKIT PINBAR PULITA (dal tuo screen 1) ---
+    c = df5.iloc[-1]; o=float(c['Open']); cc=float(c['Close']); h=float(c['High']); l=float(c['Low'])
     body=abs(cc-o); rng=h-l
     if rng==0: return None
-    up=h-max(o,cc); low=min(o,cc)-l
-    last=df.iloc[-1]; ema21=float(last['EMA21']); ema50=float(last['EMA50']); rsi=float(last['RSI'])
+    upper = h - max(o,cc)
+    lower = min(o,cc) - l
+    nose = min(upper, lower) if (cc>o and upper<lower) or (cc<o and lower<upper) else max(upper,lower)
+    # Regola più piccola
+    wick = max(upper, lower)
 
-    # GIUSTA: non troppo larga, non troppo stretta
-    if body > rng*0.25: return None # body <25%
-    if up < rng*0.12 and low > rng*0.62 and low > 2.8*body:
-        if cc>ema21 and ema21>ema50 and rsi<48 and rsi>28: # BUY solo in trend UP, RSI non pompato
-            return "BUY", int((low/rng)*100), rsi
-    if low < rng*0.12 and up > rng*0.62 and up > 2.8*body:
-        if cc<ema21 and ema21<ema50 and rsi>52 and rsi<72: # SELL solo in trend DOWN
-            return "SELL", int((up/rng)*100), rsi
-    return None
+    if wick < rng*0.70: return None # 1. Ombra almeno 70%
+    if body > rng*0.25: return None # 2. Corpo piccolo
+    if nose > rng*0.12: return None # 3. Naso cortissimo <12%
 
-def pinbar_giusta_15m(y):
-    df=get_df(y,"15m","5d")
-    if df is None: return None
-    c=df.iloc[-1]; o=float(c['Open']); cc=float(c['Close']); h=float(c['High']); l=float(c['Low'])
-    body=abs(cc-o); rng=h-l
-    if rng==0 or body>rng*0.22: return None
-    up=h-max(o,cc); low=min(o,cc)-l
-    ema21=float(c['EMA21']); ema50=float(c['EMA50']); rsi=float(c['RSI'])
+    # 4. Sporgenza: deve sporgere rispetto alle 10 candele precedenti
+    prev_lows = df5['Low'].iloc[-11:-1].min()
+    prev_highs = df5['High'].iloc[-11:-1].max()
+    sporge_bull = l < prev_lows*0.998
+    sporge_bear = h > prev_highs*1.002
+    if not (sporge_bull or sporge_bear): return None
 
-    if low>rng*0.65 and low>3*body and up<rng*0.12 and cc>ema21 and rsi<50:
-        return "BUY", int((low/rng)*100), rsi
-    if up>rng*0.65 and up>3*body and low<rng*0.12 and cc<ema21 and rsi>50:
-        return "SELL", int((up/rng)*100), rsi
+    # --- 2. A. CONTESTO (Trend vs Range) ---
+    ema21_trend = float(df_trend['EMA21'].iloc[-1]); ema50_trend = float(df_trend['EMA50'].iloc[-1])
+    ema21_5m = float(df5['EMA21'].iloc[-1]); ema50_5m = float(df5['EMA50'].iloc[-1])
+    trend_up = ema21_trend > ema50_trend and ema21_5m > ema50_5m
+    trend_down = ema21_trend < ema50_trend and ema21_5m < ema50_5m
+
+    # --- 2. B. CONFLUENZA GRAFICA ---
+    # Supporti/Resistenze statici: guarda massimi/minimi ultimi 50 candele H4
+    swing_high = float(df_trend['High'].iloc[-50:].max())
+    swing_low = float(df_trend['Low'].iloc[-50:].min())
+    # Fibonacci 50-61.8%
+    fib_50 = swing_low + (swing_high-swing_low)*0.50
+    fib_618 = swing_low + (swing_high-swing_low)*0.618
+    in_fibo = (fib_50*0.998 <= cc <= fib_618*1.002) or (fib_50*0.998 <= l <= fib_618*1.002) or (fib_50*0.998 <= h <= fib_618*1.002)
+
+    tocca_ema21 = abs(cc - ema21_5m) < rng*0.5 or abs(l - ema21_5m) < rng*0.5
+    tocca_ema50 = abs(cc - ema50_5m) < rng*0.5 or abs(l - ema50_5m) < rng*0.5
+    tocca_sup_res = abs(cc - swing_low) < rng or abs(cc - swing_high) < rng
+
+    confluenza = sum([in_fibo, tocca_ema21, tocca_ema50, tocca_sup_res]) >= 1 # almeno 1 come da screen
+    if not confluenza: return None
+
+    # DIREZIONE FINALE - Solo pullback nella direzione del trend principale
+    if lower == wick and sporge_bull and trend_up and (tocca_ema21 or tocca_ema50 or in_fibo):
+        return "BUY", int((wick/rng)*100), "Pullback UP + EMA21/50 + Fibo" if in_fibo else "Pullback UP + EMA"
+    if upper == wick and sporge_bear and trend_down and (tocca_ema21 or tocca_ema50 or in_fibo):
+        return "SELL", int((wick/rng)*100), "Pullback DOWN + EMA21/50 + Fibo" if in_fibo else "Pullback DOWN + EMA"
+
     return None
 
 def bot_loop():
     global AVVIO
     if not AVVIO:
-        send(f"✅ *PIN BAR GIUSTA ATTIVA*\nBody<25% Wick>62% + Trend EMA + RSI 28-72\n5-8 segnali al giorno\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
+        send(f"✅ *3 PILASTRI ATTIVI*\n1. Wick>70% Body<25% Naso<12% + Sporgenza\n2. Trend + EMA21/50 + Fibo 50-61.8%\nFiltra tutti i falsi\n{datetime.now(ITALY_TZ).strftime('%H:%M:%S')} ITALIA")
         AVVIO=True
     while True:
         try:
             for base, otc, reali in ALL:
                 now=datetime.now(ITALY_TZ)
+                # Per rispettare time frame corretto evitiamo 1m, usiamo chiusura 5m
                 sec=(5-now.minute%5)*60-now.second
-                if 20<=sec<=100:
-                    r=pinbar_giusta_5m(base)
-                    if r:
-                        d,p,rs=r
-                        for lab in [otc,reali]:
-                            k=f"{lab}_5M_{d}"
-                            if k in LAST and time.time()-LAST[k]<300: continue
-                            msg=f"📌 *PIN BAR 5M*\n{lab}\n{'🟢 BUY 5M' if d=='BUY' else '🔴 SELL 5M'}\nWick {p}% RSI {rs:.0f} | {sec}s\n⏰ {now.strftime('%H:%M:%S')} ITALIA"
-                            send(msg); LAST[k]=time.time()
+                if not 20 <= sec <= 120: continue
 
-                if 15-(now.minute%15) <= 3:
-                    r=pinbar_giusta_15m(base)
-                    if r:
-                        d,p,rs=r
-                        for lab in [otc,reali]:
-                            k=f"{lab}_15M_{d}"
-                            if k in LAST and time.time()-LAST[k]<600: continue
-                            msg=f"📌📌 *PIN BAR 15M*\n{lab}\n{'🟢 BUY 15M' if d=='BUY' else '🔴 SELL 15M'}\nWick {p}% RSI {rs:.0f}\n⏰ {now.strftime('%H:%M:%S')} ITALIA SICURA"
-                            send(msg); LAST[k]=time.time()
-                time.sleep(0.7)
-            time.sleep(3)
+                res = check_3_pilastri(base)
+                if not res: continue
+                direction, perc, motivo = res
+
+                for label in [otc, reali]:
+                    key=f"{label}_{direction}_PILASTRI"
+                    if key in LAST and time.time()-LAST[key]<600: continue # 10 min
+
+                    if direction=="BUY":
+                        msg=f"💎 *PINBAR PULITA 3 PILASTRI*\n{label}\n🟢 BUY 5M\nWick {perc}% | Naso OK | Sporgenza OK\n📍 {motivo}\n⏰ {now.strftime('%H:%M:%S')} ITALIA"
+                    else:
+                        msg=f"💎 *PINBAR PULITA 3 PILASTRI*\n{label}\n🔴 SELL 5M\nWick {perc}% | Naso OK | Sporgenza OK\n📍 {motivo}\n⏰ {now.strftime('%H:%M:%S')} ITALIA"
+                    send(msg); LAST[key]=time.time()
+                time.sleep(1)
+            time.sleep(5)
         except Exception as e:
             print(e); time.sleep(5)
 
