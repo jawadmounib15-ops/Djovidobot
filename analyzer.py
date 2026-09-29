@@ -77,7 +77,7 @@ PAGE="""<!DOCTYPE html><html><head><meta charset=utf-8><meta name=viewport conte
 <style>body{background:#111;color:#fff;font-family:Arial;padding:15px}.card{border:2px solid #0f0;padding:12px;margin:10px 0;border-radius:8px}.CALL{color:#0f0}.PUT{color:#f44}</style></head><body>
 <h2>🔓 Analyzer LARGO - Inizio Test</h2><p>Partiamo largo (8-12 segnali/giorno) poi stringiamo</p><button onclick=load()>Aggiorna</button><div id=l></div>
 <audio id=b src=https://cdn.pixabay.com/audio/2022/03/10/audio_1c8c9a0727.mp3></audio>
-<script>async function load(){let r=await fetch('/api/signals');let d=await r.json();let c=document.getElementById('l');c.innerHTML='';if(!d.length){c.innerHTML='<p>Nessun segnale in questo minuto, ricontrollo tra 60s</p>';return} d.forEach(s=>{let e=document.createElement('div');e.className='card';e.innerHTML=`<b>${s.coppia}</b> ${s.lavoro} - ${s.ora}<br><h2 class=${s.dir}>${s.dir}</h2>Scadenza: <b>${s.scadenza}</b> | Alt ${s.scadenza_30}<br>Trend ${s.trend1h} RSI ${s.rsi}`;c.appendChild(e)});document.getElementById('b').play()}load();setInterval(load,60000)</script></body></html>"""
+<script>async function load(){let r=await fetch('/api/signals');let d=await r.json();let c=document.getElementById('l');c.innerHTML='';if(!d.length){c.innerHTML='<p>Nessun segnale in questo minuto, ricontrollo tra 60s</p>';return} d.forEach(s=>{let e=document.createElement('div');e.className='card';e.innerHTML=`<b>${s.coppia}</b> ${s.lavoro} - ${s.ora}<br><h2 class=${s.dir}>${s.dir}</h2>Scadenza: <b>${s.scadenza}</b> | Alt ${s.scadenza_30}<br>Trend ${s.trend1h} RSI ${s.rsi}`;c.appendChild(e)});document.getElementById('b').play()}load();setInterval(load,15000)</script></body></html>"""
 
 @app.route('/')
 def home(): return PAGE
