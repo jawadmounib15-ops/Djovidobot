@@ -8,12 +8,10 @@ from curl_cffi import requests as c_requests
 app = Flask(__name__)
 ITALY_TZ = timezone(timedelta(hours=2))
 
-# V4.6 NOTTE - SOLO REAL SEMPRE APERTI
+# V5.2 NIGHT CLEAN - SOLO QUELLI ACCESI STANOTTE
 PAIRS = {
  "Ethereum (REAL +48%)":"ETH-USD",
- "Bitcoin (REAL +23%)":"BTC-USD",
- "BNB (REAL)":"BNB-USD",
- "Solana (REAL)":"SOL-USD"
+ "Bitcoin (REAL +23%)":"BTC-USD"
 }
 
 session = c_requests.Session(impersonate="chrome")
@@ -55,29 +53,25 @@ def analyze(df):
     price=float(last['Close'])
     up_trend = e9 > e21 and e21 > e50 and price > e9
     down_trend = e9 < e21 and e21 < e50 and price < e9
-    if not (30 <= rsi <= 70):
-        return {"score":0,"action":"WAIT","reason":f"RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+    if not (30 <= rsi <= 70): return {"score":0,"action":"WAIT","reason":f"RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
     bullish = float(last['Close']) > float(last['Open'])
     bearish = float(last['Close']) < float(last['Open'])
-    if up_trend and 45 <= rsi <= 62 and bullish:
-        return {"score":92,"action":"BUY 92%","reason":f"TREND UP RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-    if down_trend and 38 <= rsi <= 55 and bearish:
-        return {"score":92,"action":"SELL 92%","reason":f"TREND DOWN RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+    if up_trend and 45 <= rsi <= 62 and bullish: return {"score":92,"action":"BUY 92%","reason":f"TREND UP RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+    if down_trend and 38 <= rsi <= 55 and bearish: return {"score":92,"action":"SELL 92%","reason":f"TREND DOWN RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
     return {"score":0,"action":"WAIT","reason":f"Attendo RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
 
-HTML="""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V4.6 NIGHT REAL</title>
+HTML="""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V5.2 NIGHT CLEAN</title>
 <style>body{background:#0a0a0f;color:#fff;font-family:system-ui;padding:12px}select{width:100%;padding:12px;border-radius:10px;background:#1a1a22;color:#fff;border:1px solid #333;margin:6px 0}.row{display:flex;gap:8px}.row select{flex:1}.card{background:#1a1a22;padding:14px;border-radius:14px;margin:10px 0;border-left:5px solid #333}.sbuy{border-left-color:#00ff88;border:2px solid #00ff88}.new{animation:pulse 1s infinite}.badge{padding:6px 12px;border-radius:20px;font-weight:bold;background:#00ff88;color:#000}.perc{font-size:26px;font-weight:900;color:#00ff88}button{width:100%;padding:14px;background:#00ff88;color:#000;border:none;border-radius:12px;font-weight:bold;font-size:17px}.age{font-size:12px;font-weight:bold;color:#00ff88}@keyframes pulse{0%{box-shadow:0 0 0 0 #00ff88}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}</style></head><body>
-<h2>🌙 V4.6 NIGHT REAL</h2><p style=color:#00ff88>SOLO CRYPTO REAL - Sempre aperte, dati identici a Quotex REAL</p>
-<p style=color:#aaa>💡 Ethereum +48% è il migliore ora! Bitcoin +23% paga poco</p>
-<div class="row"><select id="pair"><option>Ethereum (REAL +48%)</option><option>Bitcoin (REAL +23%)</option><option>BNB (REAL)</option><option>Solana (REAL)</option></select><select id="tf"><option>5m</option></select></div>
+<h2>🌙 V5.2 NIGHT CLEAN</h2><p style=color:#00ff88>✅ Solo ETH + BTC REAL - Verificati accesi</p>
+<div class="row"><select id="pair"><option>Ethereum (REAL +48%)</option><option>Bitcoin (REAL +23%)</option></select><select id="tf"><option>5m</option></select></div>
 <button onclick="analyze()">ANALIZZA</button>
 <label style="display:flex;align-items:center;gap:8px;margin:10px 0;color:#aaa"><input type="checkbox" id="soundOn" checked> 🔊 Suono su 92%</label>
-<div id="result"><div class=card>Pronto NOTTE REAL</div></div><h3>Segnali LIVE CRYPTO REAL</h3><div id="auto"></div>
+<div id="result"><div class=card>Pronto - solo ETH e BTC REAL</div></div><h3>🚨 Segnali LIVE</h3><div id="auto"></div>
 <script>
 let firstSeen={};
-function beep(){try{let c=new (window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();let g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=900;g.gain.setValueAtTime(0.9,c.currentTime);o.start();setTimeout(()=>{o.stop();c.close();},600);if(navigator.vibrate) navigator.vibrate([400,100,400]);}catch(e){}}
+function beep(){try{let c=new (window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();let g=c.createGain();o.connect(g);g.connect(c.destination);o.frequency.value=900;g.gain.setValueAtTime(0.9,c.currentTime);o.start();setTimeout(()=>{o.stop();c.close();},800);if(navigator.vibrate) navigator.vibrate([500,100,500]);}catch(e){}}
 async function analyze(){let p=document.getElementById('pair').value;let r=await fetch('/api/analyze?pair='+encodeURIComponent(p)+'&t='+Date.now());let d=await r.json();document.getElementById('result').innerHTML='<div class=card '+(d.score>=92?'sbuy new':'')+'><b>'+p+'</b> <span class=badge>'+d.action+'</span><div class=perc>'+d.score+'%</div><small>'+d.reason+' - '+d.time+'</small></div>';if(d.score>=92) beep();}
-async function scan(){try{let r=await fetch('/api/scan?t='+Date.now());let d=await r.json();let h='';let now=Date.now();d.forEach(c=>{let key=c.pair+c.action;if(!firstSeen[key]){firstSeen[key]=now;}let ageSec=Math.floor((now-firstSeen[key])/1000);let ageText=ageSec<120?'🟢 NUOVO! '+ageSec+'s':'🟡 '+Math.floor(ageSec/60)+'m';let cardClass=ageSec<120?'card sbuy new':'card sbuy';h+='<div class=\"'+cardClass+'\"><b>'+c.pair+'</b> <span class=badge>'+c.action+'</span> <span class=age>'+ageText+'</span><div class=perc>'+c.score+'%</div><small>'+c.reason+' - '+c.time+'</small></div>';});if(d.length===0){h='<div class=card>⏳ Cerco trend su ETH/BTC REAL...<br><small>Crypto è lenta, ma precisa</small></div>';}document.getElementById('auto').innerHTML=h;}catch(e){}}
+async function scan(){try{let r=await fetch('/api/scan?t='+Date.now());let d=await r.json();let h='';let now=Date.now();d.forEach(c=>{let key=c.pair+c.action;if(!firstSeen[key]){firstSeen[key]=now;if(document.getElementById('soundOn').checked) beep();}let ageSec=Math.floor((now-firstSeen[key])/1000);let ageText=ageSec<120?'🟢 NUOVO! '+ageSec+'s':'🟡 '+Math.floor(ageSec/60)+'m';let cardClass=ageSec<120?'card sbuy new':'card sbuy';h+='<div class=\"'+cardClass+'\"><b>'+c.pair+'</b> <span class=badge>'+c.action+'</span> <span class=age>'+ageText+'</span><div class=perc>'+c.score+'%</div><small>'+c.reason+' - '+c.time+'</small></div>';});if(d.length===0){h='<div class=card>⏳ Attendo trend su ETH/BTC...<br><small>Scansione ogni 15s - '+new Date().toLocaleTimeString()+'</small></div>';}document.getElementById('auto').innerHTML=h;}catch(e){}}
 scan(); setInterval(scan,15000);
 </script></body></html>"""
 
