@@ -10,8 +10,10 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 bot = Bot(token=TELEGRAM_TOKEN)
 app = Flask(__name__)
+
 @app.route('/')
-def home(): return "Bot POCKET 5m V2.1 STRETTO 1 FILTRO ON"
+def home():
+    return "Bot POCKET 5m V2.2 LARGO 1 FILTRO ON - 15s"
 
 def run_flask():
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
@@ -33,33 +35,32 @@ def is_pinbar_filtrata(o,h,l,c, ema9, ema21, ema50, rsi, df):
     up = h - max(o,c)
     low = min(o,c) - l
 
-    # Stretto un pelo: era 10-28% ora 12-25%
-    if body < rng * 0.12: return None
-    if body > rng * 0.25: return None
-    if min(up,low) > rng * 0.18: return None
+    # --- V2.2 LARGO: era 12-25% ora 10-30% ---
+    if body < rng * 0.10: return None
+    if body > rng * 0.30: return None
+    if min(up,low) > rng * 0.28: return None # era 0.18 stretto, ora 0.28 largo
 
-    # --- UNICO FILTRO NUOVO: SPORGENZA ---
+    # --- UNICO FILTRO: SPORGENZA (allargato) ---
     prev_low = df['Low'].iloc[-11:-1].min()
     prev_high = df['High'].iloc[-11:-1].max()
-    sporge_bull = l < prev_low * 0.999
-    sporge_bear = h > prev_high * 1.001
-    if not (sporge_bull or sporge_bear):
-        return None
+    sporge_bull = l < prev_low * 0.9995 # era 0.999 ora 0.9995 più facile
+    sporge_bear = h > prev_high * 1.0005
+    if not (sporge_bull or sporge_bear): return None
 
-    if low >= body*2.6:
+    if low >= body*2.0: # era 2.6 ora 2.0 più largo
         ratio = low/body
-        if ratio > 6.5: return None # era 8x ora 6.5x
-        if up > rng*0.20: return None
-        if not (ema9 > ema21 and c > ema50): return None
-        if not (42 <= rsi <= 58): return None
+        if ratio > 8.0: return None # era 6.5x ora 8.0x LARGO
+        if up > rng*0.35: return None # era 0.20 ora 0.35
+        if not (ema9 > ema21): return None # tolto c>ema50 per allargare
+        if not (38 <= rsi <= 62): return None # era 42-58 ora 38-62
         return "CALL", round(ratio,1)
 
-    if up >= body*2.6:
+    if up >= body*2.0:
         ratio = up/body
-        if ratio > 6.5: return None
-        if low > rng*0.20: return None
-        if not (ema9 < ema21 and c < ema50): return None
-        if not (42 <= rsi <= 58): return None
+        if ratio > 8.0: return None
+        if low > rng*0.35: return None
+        if not (ema9 < ema21): return None
+        if not (38 <= rsi <= 62): return None
         return "PUT", round(ratio,1)
 
     return None
@@ -67,7 +68,7 @@ def is_pinbar_filtrata(o,h,l,c, ema9, ema21, ema50, rsi, df):
 def analizza():
     now_ts = datetime.now().timestamp()
     for coppia in random.sample(COPPIE, len(COPPIE)):
-        if coppia in ultimo_segnali and now_ts - ultimo_segnali[coppia] < 900:
+        if coppia in ultimo_segnali and now_ts - ultimo_segnali[coppia] < 600: # era 900 ora 600 = 10 min
             continue
         try:
             df = yf.Ticker(coppia, session=session).history(period="5d", interval="5m")
@@ -83,7 +84,7 @@ def analizza():
             last_rsi = float(rsi.iloc[-1])
             row = df.iloc[-1]
             avg_rng = (df['High'] - df['Low']).rolling(20).mean().iloc[-1]
-            if (row['High'] - row['Low']) < avg_rng * 0.80: continue
+            if (row['High'] - row['Low']) < avg_rng * 0.60: continue # era 0.80 ora 0.60 più largo
             res = is_pinbar_filtrata(row['Open'],row['High'],row['Low'],row['Close'], ema9, ema21, ema50, last_rsi, df)
             if res:
                 d, ratio = res
@@ -94,15 +95,15 @@ def analizza():
 
 async def bot_loop():
     ora = datetime.now(ROMA).strftime('%H:%M:%S')
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"✅ POCKET 5m V2.1 STRETTO 1 FILTRO\nBody 12-25% Ratio max 6.5x + Sporgenza\n{ora} IT")
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"✅ POCKET 5m V2.2 LARGO 1 FILTRO\nBody 10-30% Ratio max 8.0x + Sporgenza\n15s CHECK - {ora} IT")
     while True:
-        await asyncio.sleep(90)
+        await asyncio.sleep(15) # ERA 90 ORA 15 SECONDI COME VOLEVI TU
         res = analizza()
         ora = datetime.now(ROMA).strftime('%H:%M:%S')
         if res:
             nome, direz, rsi, ratio = res
             emoji = "🟢" if direz=="CALL" else "🔴"
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} 5m - {direz}\nREAL: {nome} | OTC: {nome} OTC\nV2.1 {ratio}x | RSI {rsi:.0f} | Sporgenza OK | {ora} IT")
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} 5m - {direz}\nREAL: {nome} | OTC: {nome} OTC\nV2.2 LARGO {ratio}x | RSI {rsi:.0f} | Sporgenza OK | {ora} IT")
 
 def start_bot():
     asyncio.run(bot_loop())
