@@ -9,6 +9,9 @@ app = Flask(__name__)
 session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
 
+# FIX INVERSIONE - se vedi ancora contrario metti True
+INVERTI_SEGNALE = False
+
 COPPIE = {
     "EURUSD=X":"EUR/USD (REAL)",
     "GBPUSD=X":"GBP/USD",
@@ -39,7 +42,7 @@ HTML = """
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>V8.4 BATCH ANTI-LAG</title>
+<title>V8.5 BATCH FIX</title>
 <style>
 body{background:#0e0e0e;color:white;font-family:Arial;padding:15px;margin:0}
 .card{background:#1e1e1e;padding:15px;border-radius:15px;margin-top:15px}
@@ -54,15 +57,15 @@ body{background:#0e0e0e;color:white;font-family:Arial;padding:15px;margin:0}
 </style>
 </head>
 <body>
-<h1>🎯 V8.4 BATCH 5x5</h1>
-<div class="top">⚡ Batch 5 + Anti-Lag 6s + 22 Reali + Pre-Alert 60s</div>
-<div class="auto">🟢 BATCH SCAN: {{batch_info}} | LIVE {{live}}/22</div>
+<h1>🎯 V8.5 FIX - BATCH 5x5</h1>
+<div class="top">⚡ Batch 5 + Anti-Lag 10m + 22 Reali + Pre-Alert 60s</div>
+<div class="auto">🟢 {{batch_info}} | LIVE {{live}}/22 | LAG {{lag_count}}</div>
 <div class="card {{'pre-card' if 'PREPARATI' in segnale else 'live-card' if 'ENTRA' in segnale else ''}}">
 <h3 style="margin:0 0 10px 0">
 {% if 'PREPARATI' in segnale %}⚠️ PRE-ALLARME{% elif 'ENTRA' in segnale %}✅ ENTRA ORA{% else %}🚨 BATCH SCAN LIVE{% endif %}
 </h3>
 <div style="font-size:18px;font-weight:bold;padding:12px;background:#0e0e0e;border-radius:10px">{{segnale}}</div>
-<div style="color:#888;margin-top:8px">{{ora2}} - M5: {{candela_min}}m {{candela_sec}}s - {{batch_info}} - {{lag_status}}</div>
+<div style="color:#888;margin-top:8px">{{ora2}} - M5: {{candela_min}}m {{candela_sec}}s - {{lag_status}}</div>
 </div>
 <div class="card">
 <div style="display:flex;justify-content:space-between">
@@ -70,14 +73,14 @@ body{background:#0e0e0e;color:white;font-family:Arial;padding:15px;margin:0}
 </div>
 <div style="color:#00ff88;font-size:36px;font-weight:bold;margin:8px 0">{{percent}}%</div>
 <div style="color:#aaa">{{msg}} - {{ora}}</div>
-<div style="color:#ffaa00;font-size:11px;margin-top:5px">Batch: 5 coppie alla volta + pausa 0.8s = zero lag</div>
+<div style="color:#ffaa00;font-size:11px;margin-top:5px">Batch: 5 alla volta + 0.3s pausa = no lag - Sbloccato</div>
 </div>
 <script>setTimeout(()=>location.reload(), 3000)</script>
 </body>
 </html>
 """
 
-ultimo_stato = {"percent":0,"msg":"Batch 5x5 anti-lag","segnale":"Cerco BATCH 5x5...","candela_min":0,"candela_sec":0,"live":0,"lag_count":0,"lag_status":"OK","batch_info":"Batch 0/5"}
+ultimo_stato = {"percent":0,"msg":"Avvio scan...","segnale":"Avvio V8.5... scansiono subito","candela_min":0,"candela_sec":0,"live":0,"lag_count":0,"lag_status":"Avvio","batch_info":"Avvio..."}
 
 def check_anti_lag(df):
     try:
@@ -88,10 +91,17 @@ def check_anti_lag(df):
         last_time_rome = last_time.tz_convert(ROMA)
         now_rome = datetime.now(ROMA)
         diff = (now_rome - last_time_rome).total_seconds()
-        if diff > 360: return False
+        if diff > 600: # 10 minuti, prima era 6 e bloccava tutto
+            return False
         return True
     except:
         return True
+
+def correggi_segnali(testo):
+    if not INVERTI_SEGNALE: return testo
+    if "CALL" in testo: return testo.replace("CALL","PUT")
+    if "PUT" in testo: return testo.replace("PUT","CALL")
+    return testo
 
 def analizza_batch():
     live_count = 0
@@ -104,13 +114,13 @@ def analizza_batch():
         start = batch_idx * batch_size
         end = start + batch_size
         batch = coppie_list[start:end]
-        ultimo_stato["batch_info"] = f"Batch {batch_idx+1}/{total_batches} ({len(batch)} coppie)"
+        ultimo_stato["batch_info"] = f"Batch {batch_idx+1}/{total_batches} | {start+1}-{min(end, len(coppie_list))} di 22"
         
         for cp, nome in batch:
             try:
                 df5 = yf.Ticker(cp, session=session).history(period="5d", interval="5m")
                 df15 = yf.Ticker(cp, session=session).history(period="5d", interval="15m")
-                if len(df5)<60 or len(df15)<40:
+                if len(df5)<50 or len(df15)<30:
                     lag_count+=1
                     continue
                 if not check_anti_lag(df5):
@@ -129,46 +139,61 @@ def analizza_batch():
                 row = df5.iloc[-1]; prev = df5.iloc[-2]; prev2 = df5.iloc[-3]
                 avg = (df5['High']-df5['Low']).rolling(20).mean().iloc[-1]
                 rng = row['High']-row['Low']; body = abs(row['Close']-row['Open'])
-                if rng==0 or rng < avg*0.50: continue
+                if rng==0 or rng < avg*0.45: continue
                 up = row['High']-max(row['Open'],row['Close'])
                 low = min(row['Open'],row['Close'])-row['Low']
                 closes = cl5.iloc[-5:].tolist()
                 trend_giu_forte = closes[-1]<closes[-2]<closes[-3]<closes[-4]
                 trend_su_forte = closes[-1]>closes[-2]>closes[-3]>closes[-4]
                 if body>=rng*0.08 and body<=rng*0.35:
-                    if low>=body*2.0 and up<=rng*0.35 and ema9>ema21 and ema9_15>ema21_15 and not trend_giu_forte and 35<=rsi<=60:
-                        return f"{nome} 5m - CALL | PINBAR {round(low/body,1)}x RSI {rsi:.0f}", 70, live_count, lag_count
-                    if up>=body*2.0 and low<=rng*0.35 and ema9<ema21 and ema9_15<ema21_15 and not trend_su_forte and 40<=rsi<=65:
-                        return f"{nome} 5m - PUT | PINBAR {round(up/body,1)}x RSI {rsi:.0f}", 70, live_count, lag_count
+                    if low>=body*1.8 and up<=rng*0.35 and ema9>ema21 and ema9_15>ema21_15 and not trend_giu_forte and 30<=rsi<=62:
+                        return correggi_segnali(f"{nome} 5m - CALL | PINBAR {round(low/body,1)}x RSI {rsi:.0f}"), 70, live_count, lag_count
+                    if up>=body*1.8 and low<=rng*0.35 and ema9<ema21 and ema9_15<ema21_15 and not trend_su_forte and 38<=rsi<=68:
+                        return correggi_segnali(f"{nome} 5m - PUT | PINBAR {round(up/body,1)}x RSI {rsi:.0f}"), 70, live_count, lag_count
                 b1 = abs(prev['Close']-prev['Open'])
-                if b1>0 and body>=b1*1.3 and body<=b1*6.0:
-                    if prev['Close']<prev['Open'] and row['Close']>row['Open'] and ema9>ema21 and ema9_15>ema21_15 and 32<=rsi<=60:
-                        return f"{nome} 5m - CALL | ENGULF {round(body/b1,1)}x", 75, live_count, lag_count
-                    if prev['Close']>prev['Open'] and row['Close']<row['Open'] and ema9<ema21 and ema9_15<ema21_15 and 40<=rsi<=68:
-                        return f"{nome} 5m - PUT | ENGULF {round(body/b1,1)}x", 75, live_count, lag_count
-                if abs(row['Close']-ema9)/row['Close'] < 0.00045:
-                    if row['Close']>ema9 and ema9>ema21 and ema9_15>ema21_15 and 32<=rsi<=58:
-                        return f"{nome} 5m - CALL | RETEST RSI {rsi:.0f}", 70, live_count, lag_count
-                    if row['Close']<ema9 and ema9<ema21 and ema9_15<ema21_15 and 42<=rsi<=68:
-                        return f"{nome} 5m - PUT | RETEST RSI {rsi:.0f}", 70, live_count, lag_count
+                if b1>0 and body>=b1*1.2 and body<=b1*6.0:
+                    if prev['Close']<prev['Open'] and row['Close']>row['Open'] and ema9>ema21 and ema9_15>ema21_15 and 30<=rsi<=62:
+                        return correggi_segnali(f"{nome} 5m - CALL | ENGULF {round(body/b1,1)}x"), 75, live_count, lag_count
+                    if prev['Close']>prev['Open'] and row['Close']<row['Open'] and ema9<ema21 and ema9_15<ema21_15 and 38<=rsi<=70:
+                        return correggi_segnali(f"{nome} 5m - PUT | ENGULF {round(body/b1,1)}x"), 75, live_count, lag_count
+                if abs(row['Close']-ema9)/row['Close'] < 0.00055:
+                    if row['Close']>ema9 and ema9>ema21 and ema9_15>ema21_15 and 30<=rsi<=60:
+                        return correggi_segnali(f"{nome} 5m - CALL | RETEST RSI {rsi:.0f}"), 70, live_count, lag_count
+                    if row['Close']<ema9 and ema9<ema21 and ema9_15<ema21_15 and 40<=rsi<=70:
+                        return correggi_segnali(f"{nome} 5m - PUT | RETEST RSI {rsi:.0f}"), 70, live_count, lag_count
                 if prev2['High']>prev['High'] and prev2['Low']<prev['Low']:
-                    if row['Close']>prev2['High']*0.9998 and ema9>ema21 and ema9_15>ema21_15 and 35<=rsi<=60:
-                        return f"{nome} 5m - CALL | INSIDE", 70, live_count, lag_count
-                    if row['Close']<prev2['Low']*1.0002 and ema9<ema21 and ema9_15<ema21_15 and 40<=rsi<=65:
-                        return f"{nome} 5m - PUT | INSIDE", 70, live_count, lag_count
-                if rsip<45 and 35<=rsi<=55 and ema9>ema21 and ema9_15>ema21_15:
-                    return f"{nome} 5m - CALL | RSI {rsi:.0f}", 65, live_count, lag_count
-                if rsip>55 and 45<=rsi<=65 and ema9<ema21 and ema9_15<ema21_15:
-                    return f"{nome} 5m - PUT | RSI {rsi:.0f}", 65, live_count, lag_count
+                    if row['Close']>prev2['High']*0.9998 and ema9>ema21 and ema9_15>ema21_15 and 32<=rsi<=62:
+                        return correggi_segnali(f"{nome} 5m - CALL | INSIDE"), 70, live_count, lag_count
+                    if row['Close']<prev2['Low']*1.0002 and ema9<ema21 and ema9_15<ema21_15 and 38<=rsi<=68:
+                        return correggi_segnali(f"{nome} 5m - PUT | INSIDE"), 70, live_count, lag_count
+                if rsip<45 and 35<=rsi<=58 and ema9>ema21 and ema9_15>ema21_15:
+                    return correggi_segnali(f"{nome} 5m - CALL | RSI {rsi:.0f}"), 65, live_count, lag_count
+                if rsip>55 and 42<=rsi<=68 and ema9<ema21 and ema9_15<ema21_15:
+                    return correggi_segnali(f"{nome} 5m - PUT | RSI {rsi:.0f}"), 65, live_count, lag_count
             except:
                 lag_count+=1
                 continue
         if batch_idx < total_batches-1:
-            time.sleep(0.8)
+            time.sleep(0.3)
     return None, 0, live_count, lag_count
 
 def loop_batch():
     pre_allarme_inviato = False
+    # SCAN IMMEDIATO SBLOCCO
+    try:
+        res, perc, live, lag = analizza_batch()
+        ultimo_stato["live"]=live; ultimo_stato["lag_count"]=lag
+        ultimo_stato["lag_status"]=f"{live} LIVE - Sbloccato"
+        ultimo_stato["batch_info"]=f"Avvio OK: {live}/22 LIVE"
+        if res:
+            ultimo_stato["segnale"]=f"✅ ENTRA ORA → {res} - SCAD 5m"
+            ultimo_stato["percent"]=perc
+            ultimo_stato["msg"]=f"Segnale avvio {datetime.now(ROMA).strftime('%H:%M:%S')}"
+        else:
+            ultimo_stato["segnale"]=f"Cerco BATCH 5x5 22 coppie... {live} LIVE"
+    except Exception as e:
+        ultimo_stato["segnale"]=f"Errore avvio: {e}"
+
     while True:
         now = datetime.now(ROMA)
         minuto_candela = now.minute % 5
@@ -193,7 +218,7 @@ def loop_batch():
                 ultimo_stato["percent"]=perc
                 ultimo_stato["msg"]=f"Pre-allarme {now.strftime('%H:%M:%S')}"
                 pre_allarme_inviato=True
-        if minuto_candela == 0 and 0 <= secondo <= 15:
+        if minuto_candela == 0 and 0 <= secondo <= 20:
             res, perc, live, lag = analizza_batch()
             ultimo_stato["live"]=live; ultimo_stato["lag_count"]=lag
             ultimo_stato["lag_status"]=f"{live} LIVE OK"
@@ -203,10 +228,10 @@ def loop_batch():
                 ultimo_stato["msg"]=f"ENTRA ORA {now.strftime('%H:%M:%S')}"
             else:
                 if pre_allarme_inviato:
-                    ultimo_stato["segnale"]="❌ Pre-allarme annullato - doppia conferma mancata"
+                    ultimo_stato["segnale"]="❌ Pre-allarme annullato"
                     ultimo_stato["percent"]=0
                 else:
-                    ultimo_stato["segnale"]=f"Cerco BATCH 5x5 22 coppie..."
+                    ultimo_stato["segnale"]=f"Cerco BATCH 5x5 22 coppie... {live} LIVE"
             pre_allarme_inviato=False
         time.sleep(1)
 
