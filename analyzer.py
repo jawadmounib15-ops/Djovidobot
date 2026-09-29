@@ -1,82 +1,74 @@
-import pytz
-from datetime import datetime
-import threading, time, os
-from flask import Flask, render_template_string
+# app/Analyzer.py - V10 SAFE - 10 COPPIE - H1 TREND + M15 ENTRATA
 import requests
 import pandas as pd
+import ta
 
-app = Flask(__name__)
-ROMA = pytz.timezone("Europe/Rome")
-COPPIE = ["EURUSD=X","GBPUSD=X","AUDUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURGBP=X","USDCAD=X","NZDUSD=X","USDCHF=X","EURCHF=X","GBPCHF=X","AUDCAD=X","AUDCHF=X","CADJPY=X","CHFJPY=X","EURAUD=X","EURCAD=X","GBPAUD=X","GBPCAD=X","NZDJPY=X"]
-NOMI = {"EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","AUDUSD=X":"AUD/USD","USDJPY=X":"USD/JPY","EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY","AUDJPY=X":"AUD/JPY","EURGBP=X":"EUR/GBP","USDCAD=X":"USD/CAD","NZDUSD=X":"NZD/USD","USDCHF=X":"USD/CHF","EURCHF=X":"EUR/CHF","GBPCHF=X":"GBP/CHF","AUDCAD=X":"AUD/CAD","AUDCHF=X":"AUD/CHF","CADJPY=X":"CAD/JPY","CHFJPY=X":"CHF/JPY","EURAUD=X":"EUR/AUD","EURCAD=X":"EUR/CAD","GBPAUD=X":"GBP/AUD","GBPCAD=X":"GBP/CAD","NZDJPY=X":"NZD/JPY"}
+# Le tue 10 coppie
+COPPIE = ["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDUSD=X","USDCAD=X","NZDUSD=X","EURGBP=X","USDCHF=X"]
+NOMI = {
+    "EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","USDJPY=X":"USD/JPY",
+    "EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY","AUDUSD=X":"AUD/USD",
+    "USDCAD=X":"USD/CAD","NZDUSD=X":"NZD/USD","EURGBP=X":"EUR/GBP","USDCHF=X":"USD/CHF"
+}
 
-HTML = """
-<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>V8.8 FIX</title>
-<style>body{background:#0e0e0e;color:#fff;font-family:Arial;padding:15px}.card{background:#1e1e1e;padding:15px;border-radius:15px;margin-top:15px}.auto{border:1px solid #00ff88;border-radius:10px;padding:10px;color:#00ff88;text-align:center}</style>
-</head><body>
-<h1>V8.8 FIX LIVE</h1>
-<div class="auto">{{batch_info}} | LIVE {{live}}/22 | LAG {{lag_count}}</div>
-<div class="card"><div>{{segnale}}</div><div style="color:#888;margin-top:8px">{{ora2}} - M5: {{candela_min}}m {{candela_sec}}s</div></div>
-<div class="card"><div style="font-size:36px;color:#00ff88">{{percent}}%</div><div>{{msg}} - {{ora}}</div></div>
-<script>setTimeout(()=>location.reload(),3000)</script>
-</body></html>
-"""
-
-stato = {"percent":0,"msg":"Avvio","segnale":"Avvio V8.8...","candela_min":0,"candela_sec":0,"live":0,"lag_count":0,"batch_info":"Avvio"}
-
-def get_df(ticker, interval="5m"):
+def get_df(ticker, interval, range_):
     try:
-        headers = {"User-Agent":"Mozilla/5.0"}
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range=5d"
-        r = requests.get(url, headers=headers, timeout=10)
+        yahoo_url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={range_}"
+        url = f"https://api.allorigins.win/raw?url={yahoo_url}"
+        r = requests.get(url, timeout=20)
         j = r.json()
         res = j['chart']['result'][0]
         ts = res['timestamp']
         q = res['indicators']['quote'][0]
-        df = pd.DataFrame({"Close":q['close'],"Open":q['open'],"High":q['high'],"Low":q['low']}, index=pd.to_datetime(ts, unit='s'))
-        return df.dropna()
+        df = pd.DataFrame({
+            "Close": q['close'],
+            "High": q['high'],
+            "Low": q['low']
+        }, index=pd.to_datetime(ts, unit='s')).dropna()
+        return df
     except:
         return pd.DataFrame()
 
-def analizza():
-    live=0; lag=0
+def analizza_safe():
+    live = 0
     for cp in COPPIE:
-        df5 = get_df(cp,"5m")
-        df15 = get_df(cp,"15m")
-        if len(df5)<30 or len(df15)<20:
-            lag+=1
+        df_h1 = get_df(cp, "60m", "20d")
+        df_m15 = get_df(cp, "15m", "5d")
+
+        if df_h1.empty or df_m15.empty: continue
+        if len(df_h1) < 210 or len(df_m15) < 50: continue
+
+        live += 1
+
+        # --- DATI H1 ---
+        close_h1 = df_h1['Close']
+        high_h1 = df_h1['High']
+        low_h1 = df_h1['Low']
+        close_m15 = df_m15['Close']
+
+        prezzo = close_h1.iloc[-1]
+        ema200 = close_h1.ewm(span=200).mean().iloc[-1]
+        adx = ta.trend.ADXIndicator(high_h1, low_h1, close_h1, 14).adx().iloc[-1]
+        macd = ta.trend.MACD(close_h1).macd().iloc[-1]
+        rsi_m15 = ta.momentum.RSIIndicator(close_m15, 14).rsi().iloc[-1]
+        e9 = close_m15.ewm(span=9).mean().iloc[-1]
+        e21 = close_m15.ewm(span=21).mean().iloc[-1]
+
+        # FILTRO SICUREZZA: ADX > 28 altrimenti è laterale
+        if adx < 28:
             continue
-        live+=1
-        cl5 = df5['Close']
-        e9 = cl5.ewm(span=9).mean().iloc[-1]
-        e21 = cl5.ewm(span=21).mean().iloc[-1]
-        if e9>e21:
-            return f"{NOMI[cp]} 5m - CALL | EMA 70%", 70, live, lag
-    return None,0,live,lag
 
-def loop():
-    res,perc,live,lag = analizza()
-    stato["live"]=live; stato["lag_count"]=lag
-    stato["batch_info"]=f"{live}/22 LIVE"
-    stato["segnale"]=f"{live} LIVE attive - cerco" if live>0 else "Ripeto fetch Yahoo..."
-    while True:
-        now = datetime.now(ROMA)
-        stato["candela_min"]=now.minute % 5
-        stato["candela_sec"]=now.second
-        if now.minute % 5 ==0 and now.second <20:
-            res,perc,live,lag = analizza()
-            stato["live"]=live; stato["lag_count"]=lag
-            stato["batch_info"]=f"{live}/22 LIVE"
-            if res:
-                stato["segnale"]=f"ENTRA ORA {res}"
-                stato["percent"]=perc
-        time.sleep(1)
+        # FILTRO TREND + ENTRATA
+        if prezzo > ema200 and macd > 0 and 45 <= rsi_m15 <= 55 and e9 > e21:
+            det = f"H1 UP | Px>EMA200 | ADX {adx:.0f} | MACD>0 | M15 RSI {rsi_m15:.0f} | EMA9>21"
+            return f"{NOMI[cp]} - CALL 30m", 85, live, det
 
-@app.route('/')
-def home():
-    ora = datetime.now(ROMA).strftime('%H:%M:%S')
-    return render_template_string(HTML, percent=stato["percent"], msg=stato["msg"], segnale=stato["segnale"], ora=ora, ora2=ora, candela_min=stato["candela_min"], candela_sec=stato["candela_sec"], live=stato["live"], lag_count=stato["lag_count"], batch_info=stato["batch_info"])
+        if prezzo < ema200 and macd < 0 and 45 <= rsi_m15 <= 55 and e9 < e21:
+            det = f"H1 DOWN | Px<EMA200 | ADX {adx:.0f} | MACD<0 | M15 RSI {rsi_m15:.0f} | EMA9<21"
+            return f"{NOMI[cp]} - PUT 30m", 85, live, det
 
-if __name__ == "__main__":
-    threading.Thread(target=loop, daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
+    return None, 0, live, "Nessun trend H1 pulito - in attesa (sicurezza)"
+
+# Per compatibilità se la tua app.py chiama analizza() invece di analizza_safe()
+def analizza():
+    return analizza_safe()
