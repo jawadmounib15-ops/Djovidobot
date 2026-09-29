@@ -1,10 +1,12 @@
-# Analyzer.py - VERSIONE FINALE SICURA 15m + 1H
-# 3 Lavori sicuri | OTC + REAL | Scadenza | Anti 43x
+# analyzer.py - FILE UNICO PER RENDER - SICURO 15m + 1H
+from flask import Flask, jsonify, render_template
 import yfinance as yf
 from datetime import datetime, timedelta
 import pytz
+import os
 from curl_cffi import requests as cffi_requests
 
+app = Flask(__name__)
 session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
 
@@ -31,8 +33,7 @@ def get_df(symbol, interval="15m", period="20d"):
         loss = -delta.where(delta<0,0).rolling(14).mean()
         df['RSI'] = 100 - (100/(1+gain/loss))
         return df
-    except:
-        return None
+    except: return None
 
 def get_trend_1h(symbol):
     try:
@@ -43,8 +44,7 @@ def get_trend_1h(symbol):
         ema21 = df['Close'].ewm(21).mean().iloc[-1]
         ema50 = df['Close'].ewm(50).mean().iloc[-1]
         return "UP" if ema21 > ema50 else "DOWN"
-    except:
-        return None
+    except: return None
 
 def calcola_scadenza():
     now = datetime.now(ROMA)
@@ -57,11 +57,9 @@ def calcola_scadenza():
     return s15.strftime("%H:%M"), s30.strftime("%H:%M")
 
 def check_pinbar(o,h,l,c):
-    body = abs(c-o)
-    rng = h-l
+    body = abs(c-o); rng = h-l
     if rng==0: return None
-    up = h-max(o,c)
-    low = min(o,c)-l
+    up = h-max(o,c); low = min(o,c)-l
     if body < rng*0.12 or body > rng*0.25: return None
     if min(up,low) > rng*0.18: return None
     if max(up,low) < rng*0.65: return None
@@ -119,13 +117,8 @@ def analizza_coppia(label):
         if res["dir"]=="CALL" and trend1h=="DOWN": continue
         if res["dir"]=="PUT" and trend1h=="UP": continue
         res.update({
-            "coppia": label,
-            "trend1h": trend1h,
-            "is_otc": "OTC" in label,
-            "scadenza_15": s15,
-            "scadenza_30": s30,
-            "scadenza": s15,
-            "ora": datetime.now(ROMA).strftime("%H:%M:%S")
+            "coppia": label, "trend1h": trend1h, "is_otc": "OTC" in label,
+            "scadenza": s15, "scadenza_30": s30, "ora": datetime.now(ROMA).strftime("%H:%M:%S")
         })
         segnali.append(res)
     return segnali
@@ -136,5 +129,17 @@ def analizza_tutto():
         out.extend(analizza_coppia(label))
     return out
 
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/api/signals')
+def signals():
+    try:
+        return jsonify(analizza_tutto())
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 if __name__ == "__main__":
-    print(analizza_tutto())
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
