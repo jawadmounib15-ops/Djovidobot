@@ -1,8 +1,7 @@
 from flask import Flask, render_template_string
 import threading, time, os, pytz, pandas as pd
 from datetime import datetime
-import yfinance as yf
-from curl_cffi import requests as cffi_requests
+from curl_cffi import requests as crequests
 
 app = Flask(__name__)
 ROMA = pytz.timezone("Europe/Rome")
@@ -14,11 +13,11 @@ HTML = """<html><head><meta name="viewport" content="width=device-width"><title>
 <style>body{background:#0e0e0e;color:#fff;font-family:Arial;padding:15px}
 .card{background:#1a1a1a;padding:16px;border-radius:16px;margin-top:14px;border-left:4px solid #00ff88}
 .safe{border:1px solid #00ff88;border-radius:12px;padding:12px;text-align:center;color:#00ff88;font-weight:bold}
-small{color:#888}</style></head><body>
+small{color:#888;word-break:break-all}</style></head><body>
 <h2>V10 SAFE - 10 COPPIE - H1+M15</h2>
 <div class="safe">{{batch_info}} | LIVE {{live}}/10 | 30m</div>
 <div class="card"><div style="font-size:18px">{{segnale}}</div><small>{{dettaglio}}</small><div style="color:#555;margin-top:8px">{{ora2}}</div></div>
-<div class="card"><div style="font-size:32px;color:#00ff88">{{percent}}%</div><div>{{msg}}</div><small>{{ora}} - EMA200 H1 + ADX>28 + MACD + RSI 45-55</small></div>
+<div class="card"><div style="font-size:32px;color:#00ff88">{{percent}}%</div><div>{{msg}}</div><small>{{ora}} - {{debug}}</small></div>
 <script>setTimeout(()=>location.reload(),15000)</script></body></html>"""
 
 def ema(s,n): return s.ewm(span=n).mean()
@@ -36,26 +35,29 @@ def adx(h,l,c,n=14):
     except: return pd.Series([30]*len(c),index=c.index)
 def macd(s): return s.ewm(span=12).mean()-s.ewm(span=26).mean()
 
-# Sessione che sblocca Yahoo su Render
-session = cffi_requests.Session(impersonate="chrome")
-
-def get_df(ticker,interval,period):
+def get_df(ticker,interval,range_):
     try:
-        # yfinance con sessione curl_cffi
-        df = yf.download(ticker, interval=interval, period=period, session=session, progress=False, auto_adjust=False)
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-        df = df.rename(columns={"Close":"Close","High":"High","Low":"Low"}).dropna()
-        if len(df) > 50: return df
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={range_}"
+        r = crequests.get(url, impersonate="chrome", timeout=30)
+        j = r.json()
+        res = j['chart']['result'][0]
+        ts = res['timestamp']
+        q = res['indicators']['quote'][0]
+        df = pd.DataFrame({"Close":q['close'],"High":q['high'],"Low":q['low']}, index=pd.to_datetime(ts, unit='s')).dropna()
+        if len(df) > 50:
+            return df, "ok"
+        return pd.DataFrame(), f"len {len(df)}"
     except Exception as e:
-        print(f"yfinance fail {ticker} {interval}: {e}")
-    return pd.DataFrame()
+        return pd.DataFrame(), str(e)[:200]
 
 def analizza_safe():
-    live=0; last="Scansione..."
+    live=0; last="Scansione..."; debug="init"
     for cp in COPPIE:
-        df_h1=get_df(cp,"60m","20d"); df_m15=get_df(cp,"15m","5d")
+        df_h1, err1 = get_df(cp,"60m","20d")
+        df_m15, err2 = get_df(cp,"15m","5d")
+        debug = f"H1:{err1} M15:{err2}"
         if df_h1.empty or df_m15.empty or len(df_h1)<200 or len(df_m15)<40:
-            last=f"{NOMI[cp]} no dati Yahoo"
+            last=f"{NOMI[cp]} no dati: {debug}"
             continue
         live+=1
         c1,h1,l1=df_h1['Close'],df_h1['High'],df_h1['Low']; c15=df_m15['Close']
@@ -64,21 +66,21 @@ def analizza_safe():
         last=f"{NOMI[cp]} ADX {adx_v:.0f} RSI {rsi_v:.0f}"
         if adx_v<28: continue
         if prezzo>e200 and macd_v>0 and 45<=rsi_v<=55 and e9>e21:
-            return f"{NOMI[cp]} - CALL 30m",85,live,f"H1 UP | Px>EMA200 | ADX {adx_v:.0f}>28 | MACD>0 | M15 RSI {rsi_v:.0f} | EMA9>21"
+            return f"{NOMI[cp]} - CALL 30m",85,live,f"H1 UP | ADX {adx_v:.0f}>28 | RSI {rsi_v:.0f} | EMA9>21", debug
         if prezzo<e200 and macd_v<0 and 45<=rsi_v<=55 and e9<e21:
-            return f"{NOMI[cp]} - PUT 30m",85,live,f"H1 DOWN | Px<EMA200 | ADX {adx_v:.0f}>28 | MACD<0 | M15 RSI {rsi_v:.0f} | EMA9<21"
-    return None,0,live,last
+            return f"{NOMI[cp]} - PUT 30m",85,live,f"H1 DOWN | ADX {adx_v:.0f}>28 | RSI {rsi_v:.0f} | EMA9<21", debug
+    return None,0,live,last,debug
 
-stato={"percent":0,"msg":"Avvio V10 SAFE...","segnale":"Carico dati con yfinance + curl_cffi (60s)","dettaglio":"Primo avvio 90 sec su Render free","live":0,"batch_info":"Avvio"}
+stato={"percent":0,"msg":"Avvio V11 con curl_cffi diretto...","segnale":"Carico 10 coppie H1+M15 - attendi 60s","dettaglio":"Primo giro lento","live":0,"batch_info":"Avvio","debug":"..."}
 
 def loop():
     while True:
         try:
-            res,perc,live,det=analizza_safe()
-            stato["live"]=live; stato["batch_info"]=f"{live}/10 LIVE"
+            res,perc,live,det,dbg=analizza_safe()
+            stato["live"]=live; stato["batch_info"]=f"{live}/10 LIVE"; stato["debug"]=dbg
             if res: stato["segnale"]=f"ENTRA ORA: {res}"; stato["dettaglio"]=det; stato["percent"]=perc; stato["msg"]=res
-            else: stato["segnale"]=f"{live}/10 LIVE - Nessun setup SAFE"; stato["dettaglio"]=det
-        except Exception as e: stato["dettaglio"]=f"Errore loop: {e}"
+            else: stato["segnale"]=f"{live}/10 LIVE - Nessun setup SAFE (normale)"; stato["dettaglio"]=det
+        except Exception as e: stato["dettaglio"]=f"Errore loop: {e}"; stato["debug"]=str(e)[:200]
         time.sleep(60)
 
 threading.Thread(target=loop,daemon=True).start()
