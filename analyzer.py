@@ -1,94 +1,140 @@
-from flask import Flask, render_template_string
-import threading, time, os, pytz, pandas as pd
-from datetime import datetime
-from curl_cffi import requests as crequests
+# Analyzer.py - VERSIONE FINALE SICURA 15m + 1H
+# 3 Lavori sicuri | OTC + REAL | Scadenza | Anti 43x
+import yfinance as yf
+from datetime import datetime, timedelta
+import pytz
+from curl_cffi import requests as cffi_requests
 
-app = Flask(__name__)
+session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
 
-COPPIE = ["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDUSD=X","USDCAD=X","NZDUSD=X","EURGBP=X","USDCHF=X"]
-NOMI = {"EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","USDJPY=X":"USD/JPY","EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY","AUDUSD=X":"AUD/USD","USDCAD=X":"USD/CAD","NZDUSD=X":"NZD/USD","EURGBP=X":"EUR/GBP","USDCHF=X":"USD/CHF"}
+YAHOO_MAP_REAL = {
+    "EURUSD=X":"EUR/USD", "GBPUSD=X":"GBP/USD", "AUDUSD=X":"AUD/USD",
+    "USDJPY=X":"USD/JPY", "EURJPY=X":"EUR/JPY", "GBPJPY=X":"GBP/JPY",
+    "AUDJPY=X":"AUD/JPY", "EURGBP=X":"EUR/GBP"
+}
+YAHOO_MAP_OTC = {k: v+" OTC" for k,v in YAHOO_MAP_REAL.items()}
 
-HTML = """<html><head><meta name="viewport" content="width=device-width"><title>V10 SAFE</title>
-<style>body{background:#0e0e0e;color:#fff;font-family:Arial;padding:15px}
-.card{background:#1a1a1a;padding:16px;border-radius:16px;margin-top:14px;border-left:4px solid #00ff88}
-.safe{border:1px solid #00ff88;border-radius:12px;padding:12px;text-align:center;color:#00ff88;font-weight:bold}
-small{color:#888;word-break:break-all}</style></head><body>
-<h2>V10 SAFE - 10 COPPIE - H1+M15</h2>
-<div class="safe">{{batch_info}} | LIVE {{live}}/10 | 30m</div>
-<div class="card"><div style="font-size:18px">{{segnale}}</div><small>{{dettaglio}}</small><div style="color:#555;margin-top:8px">{{ora2}}</div></div>
-<div class="card"><div style="font-size:32px;color:#00ff88">{{percent}}%</div><div>{{msg}}</div><small>{{ora}} - {{debug}}</small></div>
-<script>setTimeout(()=>location.reload(),15000)</script></body></html>"""
-
-def ema(s,n): return s.ewm(span=n).mean()
-def rsi(s,n=14):
-    d=s.diff(); g=d.clip(lower=0); l=-d.clip(upper=0)
-    rs=g.ewm(alpha=1/n).mean()/l.ewm(alpha=1/n).mean()
-    return 100-(100/(1+rs))
-def adx(h,l,c,n=14):
+def get_df(symbol, interval="15m", period="20d"):
     try:
-        tr=pd.concat([h-l,(h-c.shift()).abs(),(l-c.shift()).abs()],axis=1).max(axis=1)
-        atr=tr.ewm(alpha=1/n).mean(); up=h.diff(); dn=-l.diff()
-        plus=((up>dn)&(up>0))*up; minus=((dn>up)&(dn>0))*dn
-        pd1=100*plus.ewm(alpha=1/n).mean()/atr; md1=100*minus.ewm(alpha=1/n).mean()/atr
-        dx=100*(pd1-md1).abs()/(pd1+md1); return dx.ewm(alpha=1/n).mean()
-    except: return pd.Series([30]*len(c),index=c.index)
-def macd(s): return s.ewm(span=12).mean()-s.ewm(span=26).mean()
+        base = symbol.replace(" OTC","")
+        y_sym = [k for k,v in YAHOO_MAP_REAL.items() if v==base][0]
+        df = yf.Ticker(y_sym, session=session).history(period=period, interval=interval)
+        if len(df) < 60: return None
+        cl = df['Close']
+        df['EMA9'] = cl.ewm(9).mean()
+        df['EMA21'] = cl.ewm(21).mean()
+        df['EMA50'] = cl.ewm(50).mean()
+        df['ATR'] = (df['High']-df['Low']).rolling(14).mean()
+        delta = cl.diff()
+        gain = delta.where(delta>0,0).rolling(14).mean()
+        loss = -delta.where(delta<0,0).rolling(14).mean()
+        df['RSI'] = 100 - (100/(1+gain/loss))
+        return df
+    except:
+        return None
 
-def get_df(ticker,interval,range_):
+def get_trend_1h(symbol):
     try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={range_}"
-        r = crequests.get(url, impersonate="chrome", timeout=30)
-        j = r.json()
-        res = j['chart']['result'][0]
-        ts = res['timestamp']
-        q = res['indicators']['quote'][0]
-        df = pd.DataFrame({"Close":q['close'],"High":q['high'],"Low":q['low']}, index=pd.to_datetime(ts, unit='s')).dropna()
-        if len(df) > 50:
-            return df, "ok"
-        return pd.DataFrame(), f"len {len(df)}"
-    except Exception as e:
-        return pd.DataFrame(), str(e)[:200]
+        base = symbol.replace(" OTC","")
+        y_sym = [k for k,v in YAHOO_MAP_REAL.items() if v==base][0]
+        df = yf.Ticker(y_sym, session=session).history(period="20d", interval="1h")
+        if len(df)<60: return None
+        ema21 = df['Close'].ewm(21).mean().iloc[-1]
+        ema50 = df['Close'].ewm(50).mean().iloc[-1]
+        return "UP" if ema21 > ema50 else "DOWN"
+    except:
+        return None
 
-def analizza_safe():
-    live=0; last="Scansione..."; debug="init"
-    for cp in COPPIE:
-        df_h1, err1 = get_df(cp,"60m","20d")
-        df_m15, err2 = get_df(cp,"15m","5d")
-        debug = f"H1:{err1} M15:{err2}"
-        if df_h1.empty or df_m15.empty or len(df_h1)<200 or len(df_m15)<40:
-            last=f"{NOMI[cp]} no dati: {debug}"
-            continue
-        live+=1
-        c1,h1,l1=df_h1['Close'],df_h1['High'],df_h1['Low']; c15=df_m15['Close']
-        prezzo=c1.iloc[-1]; e200=ema(c1,200).iloc[-1]; adx_v=adx(h1,l1,c1).iloc[-1]
-        macd_v=macd(c1).iloc[-1]; rsi_v=rsi(c15).iloc[-1]; e9=ema(c15,9).iloc[-1]; e21=ema(c15,21).iloc[-1]
-        last=f"{NOMI[cp]} ADX {adx_v:.0f} RSI {rsi_v:.0f}"
-        if adx_v<28: continue
-        if prezzo>e200 and macd_v>0 and 45<=rsi_v<=55 and e9>e21:
-            return f"{NOMI[cp]} - CALL 30m",85,live,f"H1 UP | ADX {adx_v:.0f}>28 | RSI {rsi_v:.0f} | EMA9>21", debug
-        if prezzo<e200 and macd_v<0 and 45<=rsi_v<=55 and e9<e21:
-            return f"{NOMI[cp]} - PUT 30m",85,live,f"H1 DOWN | ADX {adx_v:.0f}>28 | RSI {rsi_v:.0f} | EMA9<21", debug
-    return None,0,live,last,debug
+def calcola_scadenza():
+    now = datetime.now(ROMA)
+    minuto = (now.minute // 15 + 1) * 15
+    if minuto >= 60:
+        s15 = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    else:
+        s15 = now.replace(minute=minuto, second=0, microsecond=0)
+    s30 = s15 + timedelta(minutes=15)
+    return s15.strftime("%H:%M"), s30.strftime("%H:%M")
 
-stato={"percent":0,"msg":"Avvio V11 con curl_cffi diretto...","segnale":"Carico 10 coppie H1+M15 - attendi 60s","dettaglio":"Primo giro lento","live":0,"batch_info":"Avvio","debug":"..."}
+def check_pinbar(o,h,l,c):
+    body = abs(c-o)
+    rng = h-l
+    if rng==0: return None
+    up = h-max(o,c)
+    low = min(o,c)-l
+    if body < rng*0.12 or body > rng*0.25: return None
+    if min(up,low) > rng*0.18: return None
+    if max(up,low) < rng*0.65: return None
+    if max(up,low) < body*2.2 or max(up,low) > body*6.5: return None
+    return (up, low)
 
-def loop():
-    while True:
-        try:
-            res,perc,live,det,dbg=analizza_safe()
-            stato["live"]=live; stato["batch_info"]=f"{live}/10 LIVE"; stato["debug"]=dbg
-            if res: stato["segnale"]=f"ENTRA ORA: {res}"; stato["dettaglio"]=det; stato["percent"]=perc; stato["msg"]=res
-            else: stato["segnale"]=f"{live}/10 LIVE - Nessun setup SAFE (normale)"; stato["dettaglio"]=det
-        except Exception as e: stato["dettaglio"]=f"Errore loop: {e}"; stato["debug"]=str(e)[:200]
-        time.sleep(60)
+def lavoro1_trend(df):
+    r = df.iloc[-1]
+    pin = check_pinbar(r['Open'],r['High'],r['Low'],r['Close'])
+    if not pin: return None
+    up, low = pin
+    if not (42 <= r['RSI'] <= 58): return None
+    if low>up and r['EMA9']>r['EMA21'] and r['Close']>r['EMA50']:
+        return {"lavoro":"L1 TREND", "dir":"CALL", "rsi":round(float(r['RSI']),1)}
+    if up>low and r['EMA9']<r['EMA21'] and r['Close']<r['EMA50']:
+        return {"lavoro":"L1 TREND", "dir":"PUT", "rsi":round(float(r['RSI']),1)}
+    return None
 
-threading.Thread(target=loop,daemon=True).start()
+def lavoro2_sporgenza(df):
+    r = df.iloc[-1]
+    pin = check_pinbar(r['Open'],r['High'],r['Low'],r['Close'])
+    if not pin: return None
+    up, low = pin
+    prev_low = df['Low'].iloc[-11:-1].min()
+    prev_high = df['High'].iloc[-11:-1].max()
+    if low>up and r['Low'] < prev_low*0.999:
+        return {"lavoro":"L2 SPORGENZA", "dir":"CALL", "rsi":round(float(r['RSI']),1)}
+    if up>low and r['High'] > prev_high*1.001:
+        return {"lavoro":"L2 SPORGENZA", "dir":"PUT", "rsi":round(float(r['RSI']),1)}
+    return None
 
-@app.route('/')
-def home():
-    ora=datetime.now(ROMA).strftime('%H:%M:%S')
-    return render_template_string(HTML,**stato,ora=ora,ora2=ora)
+def lavoro7_volatilita(df):
+    r = df.iloc[-1]
+    pin = check_pinbar(r['Open'],r['High'],r['Low'],r['Close'])
+    if not pin: return None
+    up, low = pin
+    rng = r['High']-r['Low']
+    if rng < r['ATR']*0.8 or rng > r['ATR']*2.0: return None
+    if low>up and r['Close']>r['EMA9']:
+        return {"lavoro":"L7 VOLA", "dir":"CALL", "rsi":round(float(r['RSI']),1)}
+    if up>low and r['Close']<r['EMA9']:
+        return {"lavoro":"L7 VOLA", "dir":"PUT", "rsi":round(float(r['RSI']),1)}
+    return None
 
-if __name__=="__main__":
-    app.run(host='0.0.0.0',port=int(os.environ.get("PORT",10000)))
+def analizza_coppia(label):
+    df15 = get_df(label)
+    if df15 is None: return []
+    trend1h = get_trend_1h(label)
+    if trend1h is None: return []
+    s15, s30 = calcola_scadenza()
+    segnali = []
+    for lavoro in [lavoro1_trend, lavoro2_sporgenza, lavoro7_volatilita]:
+        res = lavoro(df15)
+        if not res: continue
+        if res["dir"]=="CALL" and trend1h=="DOWN": continue
+        if res["dir"]=="PUT" and trend1h=="UP": continue
+        res.update({
+            "coppia": label,
+            "trend1h": trend1h,
+            "is_otc": "OTC" in label,
+            "scadenza_15": s15,
+            "scadenza_30": s30,
+            "scadenza": s15,
+            "ora": datetime.now(ROMA).strftime("%H:%M:%S")
+        })
+        segnali.append(res)
+    return segnali
+
+def analizza_tutto():
+    out = []
+    for label in list(YAHOO_MAP_REAL.values()) + list(YAHOO_MAP_OTC.values()):
+        out.extend(analizza_coppia(label))
+    return out
+
+if __name__ == "__main__":
+    print(analizza_tutto())
