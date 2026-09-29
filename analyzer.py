@@ -50,22 +50,7 @@ def get_single_df(df_all, symbol):
         return df
     except: return None
 
-def analyze(df):
-    now=datetime.now(ITALY_TZ)
-    if df is None: return {"score":0,"action":"WAIT","reason":"Carico...","time":now.strftime("%H:%M:%S")}
-    last=df.iloc[-2]
-    rsi=float(last['RSI'])
-    e9,e21,e50=float(last['EMA9']),float(last['EMA21']),float(last['EMA50'])
-    price=float(last['Close'])
-    up_trend = e9 > e21 and e21 > e50 and price > e9
-    down_trend = e9 < e21 and e21 < e50 and price < e9
-    if not (25 <= rsi <= 75): return {"score":0,"action":"WAIT","reason":f"RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-    bullish = float(last['Close']) > float(last['Open'])
-    bearish = float(last['Close']) < float(last['Open'])
-    # 90% - PIU' LARGO
-    if up_trend and 43 <= rsi <= 65 and bullish: return {"score":90,"action":"BUY 90%","reason":f"TREND UP RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-    if down_trend and 35 <= rsi <= 58 and bearish: return {"score":90,"action":"SELL 90%","reason":f"TREND DOWN RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
-    return {"score":0,"action":"WAIT","reason":f"Attendo RSI {rsi:.0f}","time":now.strftime("%H:%M:%S")}
+strftime("%H:%M:%S")}
 
 HTML="""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V7.2 90%</title>
 <style>body{background:#0a0a0f;color:#fff;font-family:system-ui;padding:12px}select{width:100%;padding:12px;border-radius:10px;background:#1a1a22;color:#fff;border:1px solid #333;margin:6px 0}.row{display:flex;gap:8px}.row select{flex:1}.card{background:#1a1a22;padding:14px;border-radius:14px;margin:10px 0;border-left:5px solid #333}.sbuy{border-left-color:#00ff88;border:2px solid #00ff88}.new{animation:pulse 1s infinite}.badge{padding:6px 12px;border-radius:20px;font-weight:bold;background:#00ff88;color:#000}.perc{font-size:26px;font-weight:900;color:#00ff88}button{width:100%;padding:14px;background:#00ff88;color:#000;border:none;border-radius:12px;font-weight:bold;font-size:17px}.status{padding:8px 12px;border-radius:8px;font-size:13px;margin:8px 0;background:#00ff8822;color:#00ff88;border:1px solid #00ff88}@keyframes pulse{0%{box-shadow:0 0 0 0 #00ff88}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}</style></head><body>
