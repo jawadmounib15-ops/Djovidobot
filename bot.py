@@ -12,7 +12,7 @@ bot = Bot(token=TELEGRAM_TOKEN)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot POCKET 5m V2 ON"
+def home(): return "Bot POCKET 5m V2 +1 ON"
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
 YAHOO_MAP = {
@@ -23,8 +23,6 @@ YAHOO_MAP = {
 COPPIE = list(YAHOO_MAP.keys())
 session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
-
-# Anti spam: ricorda ultimo segnale per coppia
 ultimo_segnali = {}
 
 def is_pinbar_filtrata(o,h,l,c, ema9, ema21, ema50, rsi):
@@ -33,20 +31,15 @@ def is_pinbar_filtrata(o,h,l,c, ema9, ema21, ema50, rsi):
     if rng==0: return None
     up = h - max(o,c)
     low = min(o,c) - l
-
-    # FIX 1: corpo non troppo piccolo (evita 43.4x)
-    if body < rng * 0.10: return None # min 10% - scarta doji
-    if body > rng * 0.28: return None # max 28%
-
-    # FIX 2: ratio massimo 8x (prima era infinito, per questo 43x)
+    if body < rng * 0.10: return None
+    if body > rng * 0.28: return None
     if low >= body*2.6:
         ratio = low/body
-        if ratio > 8.0: return None # scarta 43.4x
+        if ratio > 8.0: return None
         if up > rng*0.25: return None
         if not (ema9 > ema21 and c > ema50): return None
-        if not (40 <= rsi <= 60): return None # più stretto da 38-62 a 40-60
+        if not (40 <= rsi <= 60): return None
         return "CALL", round(ratio,1)
-
     if up >= body*2.6:
         ratio = up/body
         if ratio > 8.0: return None
@@ -59,11 +52,9 @@ def is_pinbar_filtrata(o,h,l,c, ema9, ema21, ema50, rsi):
 def analizza():
     now_ts = datetime.now().timestamp()
     for coppia in random.sample(COPPIE, len(COPPIE)):
-        # FIX 3: cooldown 15 min per coppia
         if coppia in ultimo_segnali:
-            if now_ts - ultimo_segnali[coppia] < 900: # 15 min
+            if now_ts - ultimo_segnali[coppia] < 900:
                 continue
-
         try:
             df = yf.Ticker(coppia, session=session).history(period="5d", interval="5m")
             if len(df) < 60: continue
@@ -71,14 +62,16 @@ def analizza():
             ema9 = cl.ewm(span=9).mean().iloc[-1]
             ema21 = cl.ewm(span=21).mean().iloc[-1]
             ema50 = cl.ewm(span=50).mean().iloc[-1]
+
+            # >>> UNICO FILTRO NUOVO AGGIUNTO <<<
+            if abs(ema9-ema21) / cl.iloc[-1] < 0.00015: continue
+
             delta = cl.diff()
             gain = delta.where(delta>0,0).rolling(14).mean()
             loss = -delta.where(delta<0,0).rolling(14).mean()
             rsi = 100 - (100/(1+gain/loss))
             last_rsi = float(rsi.iloc[-1])
             row = df.iloc[-1]
-
-            # Filtro volatilità
             avg_rng = (df['High'] - df['Low']).rolling(20).mean().iloc[-1]
             if (row['High'] - row['Low']) < avg_rng * 0.75: continue
 
@@ -92,7 +85,7 @@ def analizza():
 
 async def bot_loop():
     ora = datetime.now(ROMA).strftime('%H:%M:%S')
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"✅ POCKET 5m V2 FIXATO\nFix 43.4x | Body 10-28% | Ratio max 8x\nCooldown 15min | RSI 40-60 | {ora} IT")
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"✅ POCKET 5m V2.1\n+1 filtro gap 0.015% anti-laterale\n{ora} IT")
     while True:
         await asyncio.sleep(90)
         res = analizza()
