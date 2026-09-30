@@ -7,7 +7,17 @@ from curl_cffi import requests as cffi_requests
 app = Flask(__name__)
 session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
-MAP = {"EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","AUDUSD=X":"AUD/USD","USDJPY=X":"USD/JPY","EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY","AUDJPY=X":"AUD/JPY","EURGBP=X":"EUR/GBP"}
+
+# 20 COPPIE REALI - ZERO OTC
+MAP = {
+"EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","AUDUSD=X":"AUD/USD",
+"USDJPY=X":"USD/JPY","USDCHF=X":"USD/CHF","USDCAD=X":"USD/CAD",
+"NZDUSD=X":"NZD/USD","EURJPY=X":"EUR/JPY","EURGBP=X":"EUR/GBP",
+"EURCHF=X":"EUR/CHF","EURAUD=X":"EUR/AUD","EURCAD=X":"EUR/CAD",
+"GBPJPY=X":"GBP/JPY","GBPCHF=X":"GBP/CHF","GBPCAD=X":"GBP/CAD",
+"GBPAUD=X":"GBP/AUD","AUDJPY=X":"AUD/JPY","AUDCAD=X":"AUD/CAD",
+"AUDCHF=X":"AUD/CHF","NZDJPY=X":"NZD/JPY"
+}
 
 def get_df(sym):
     try:
@@ -26,7 +36,6 @@ def pinbar_oro(o,h,l,c, df):
     if b/r == 0: return None
     ratio_up = up/b if b>0 else 0
     ratio_lo = lo/b if b>0 else 0
-    # V4.2.1 UN PELO 62% + TREND
     if up/r < 0.62 and lo/r < 0.62: return None
     if b/r > 0.32 or b/r < 0.04: return None
     if up/r >= 0.62 and lo/r > 0.18: return None
@@ -57,10 +66,10 @@ def analizza():
         out.append({"coppia":label,"dir":d,"perc":perc,"ratio":ratio,"scadenza":sc,"ora":datetime.now(ROMA).strftime("%H:%M:%S")})
     return out
 
-PAGE="""<!DOCTYPE html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'><title>V4.2.1 62%</title>
+PAGE="""<!DOCTYPE html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width'><title>V4.2.1 REALI 20</title>
 <style>body{background:#111;color:#fff;font-family:Arial;padding:15px}.card{border:2px solid #0f0;padding:12px;margin:8px 0;border-radius:10px}.PUT{color:#f44;font-size:22px}.CALL{color:#0f0;font-size:22px}button{padding:14px;border:none;border-radius:10px;font-size:16px;font-weight:bold;margin:6px 0;width:100%}#unlock{background:#0f0;color:#000}#analyze{background:#222;color:#fff;border:1px solid #555}</style></head><body>
-<h2>🔥 V4.2.1 ORO 62% TREND 00-23 30M</h2>
-<div id=status style=color:#aaa>V4.2.1 62% attivo - Trend ON - Scad 30M - controllo ogni 15s</div>
+<h2>🔥 V4.2.1 REALI 20 COPPIE 62% TREND 00-23 30M</h2>
+<div id=status style=color:#aaa>V4.2.1 20 reali attivo - controllo ogni 15s</div>
 <button id=unlock onclick=enableAudio()>🔊 CLICCA PER ATTIVARE AUDIO</button>
 <button id=analyze onclick=load()>🔄 ANALIZZA ORA</button>
 <div id=l style=margin-top:10px></div>
@@ -72,15 +81,15 @@ function enableAudio(){
   a.play().then(()=>{a.pause(); a.currentTime=0; audioEnabled=true; document.getElementById('unlock').innerText='✅ AUDIO ATTIVO'; localStorage.setItem('audio','1');}).catch(e=>{});
 }
 async function load(){
-  document.getElementById('status').innerText='⏳ Analizzo 8 coppie...';
+  document.getElementById('status').innerText='⏳ Analizzo 20 coppie reali...';
   try{
     let r=await fetch('/api/signals'); let d=await r.json();
     let c=document.getElementById('l');
     if(d.length==0){
-      document.getElementById('status').innerText='✅ V4.2.1 62% attivo 00-23 - Nessun fakeout trend OK ora - prossimo check 15s';
-      c.innerHTML='<p style=color:#666>00-23 attivo, nessun segnale valido ora.<br>Ultimo check: '+new Date().toLocaleTimeString()+'</p>';
+      document.getElementById('status').innerText='✅ 20 REALI attivo 00-23 - Nessun fakeout trend OK ora - prossimo check 15s';
+      c.innerHTML='<p style=color:#666>20 coppie reali analizzate, nessun segnale ora.<br>Ultimo check: '+new Date().toLocaleTimeString()+'</p>';
     } else {
-      document.getElementById('status').innerText='🔥 '+d.length+' SEGNALE TROVATO!';
+      document.getElementById('status').innerText='🔥 '+d.length+' SEGNALE REALI TROVATO!';
       c.innerHTML='';
       d.forEach(s=>{
         let e=document.createElement('div'); e.className='card';
@@ -99,6 +108,5 @@ load(); setInterval(load,15000);
 def home(): return PAGE
 @app.route('/api/signals')
 def sig(): return jsonify(analizza())
-
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=10000)
