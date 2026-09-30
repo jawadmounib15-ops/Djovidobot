@@ -1,125 +1,112 @@
-import os, asyncio, threading, random
+import os, time, threading
 from flask import Flask
-from telegram import Bot
-from datetime import datetime
-import pytz
 import yfinance as yf
-from curl_cffi import requests as cffi_requests
+import pandas as pd
+import requests
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-bot = Bot(token=TELEGRAM_TOKEN)
+TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
+PAIRS = ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "EURJPY=X", "GBPJPY=X", "EURGBP=X", "USDCHF=X", "NZDUSD=X", "EURCHF=X", "AUDJPY=X", "GBPCHF=X", "EURCAD=X", "AUDCAD=X", "NZDJPY=X", "EURAUD=X", "EURNZD=X", "GBPAUD=X", "GBPCAD=X", "GBPNZD=X", "AUDNZD=X", "AUDCHF=X", "CADCHF=X", "CADJPY=X", "CHFJPY=X", "NZDCHF=X", "NZDCAD=X", "USDSEK=X", "USDMXN=X", "USDNOK=X"]
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot POCKET V1.1 MEDIO + DOPPIA CONFERMA ON"
-def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+def home():
+    return f"V61.0.1 PELO PELO - {len(PAIRS)} PAIRS"
 
-REAL_MAP = {
- "EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","AUDUSD=X":"AUD/USD",
- "USDJPY=X":"USD/JPY","EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY",
- "AUDJPY=X":"AUD/JPY","EURGBP=X":"EUR/GBP","AUDCAD=X":"AUD/CAD","AUDCHF=X":"AUD/CHF"
-}
-OTC_MAP = {k: v+" OTC" for k,v in REAL_MAP.items()}
-REAL_LIST, OTC_LIST = list(REAL_MAP.keys()), list(REAL_MAP.keys())
-session = cffi_requests.Session(impersonate="chrome")
-ROMA = pytz.timezone("Europe/Rome")
+pending=[]
 
-# === V1.1 STRETTO UN PELINO ===
-BODY_MIN, BODY_MAX = 0.09, 0.33 # era 0.07-0.38
-RATIO_MIN, RATIO_MAX = 2.3, 9.0 # era 2.0-10.0
-WICK_MAX = 0.35 # era 0.40
-RSI_MIN, RSI_MAX = 30, 70 # era 25-75
-COOLDOWN = 300
-VOL_MULT = 0.60 # era 0.50
+def send(msg):
+    try:
+        requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id": CHAT_ID, "text": msg}, timeout=10)
+    except: pass
 
-ultimo_segnali = {}
+def fix_df(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
 
-def is_pinbar_doppia_conferma(o,h,l,c, ema9, ema21, ema50, ema200, rsi, prev, prev2):
-    body = abs(c - o); rng = h - l
-    if rng==0: return None
-    up = h - max(o,c); low = min(o,c) - l
-    if body < rng * BODY_MIN or body > rng * BODY_MAX: return None
-    close_pos = (c - l) / rng
-    dist_ema200 = abs(c - ema200)/ema200 if ema200 else 0
+def rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.where(delta>0, 0).rolling(period).mean()
+    loss = -delta.where(delta<0, 0).rolling(period).mean()
+    rs = gain / loss
+    return 100 - (100/(1+rs))
 
-    prev_body = abs(prev['Close']-prev['Open'])
-    prev_rng = prev['High']-prev['Low']
-    prev_close_pos = (prev['Close']-prev['Low'])/prev_rng if prev_rng>0 else 0.5
+def atr(df, period=14):
+    hl = df['High'] - df['Low']
+    hc = abs(df['High'] - df['Close'].shift())
+    lc = abs(df['Low'] - df['Close'].shift())
+    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    return tr.rolling(period).mean()
 
-    if low >= body*RATIO_MIN: # CALL
-        ratio = low/body
-        if not (RATIO_MIN <= ratio <= RATIO_MAX): return None
-        if up > rng*WICK_MAX: return None
-        if not (ema9 > ema21 and c > ema50): return None
-        if not (RSI_MIN <= rsi <= RSI_MAX): return None
-        if close_pos < 0.62: return None # era 0.60
-        if dist_ema200 > 0.006: return None # era 0.008
+def stochastic(df, k=14, d=3):
+    low_min = df['Low'].rolling(k).min()
+    high_max = df['High'].rolling(k).max()
+    k_percent = 100 * ((df['Close'] - low_min) / (high_max - low_min))
+    return k_percent, k_percent.rolling(d).mean()
 
-        cond1 = prev['Close'] < prev['Open'] or (prev['Low'] < prev2['Low'] and prev_close_pos > 0.5)
-        cond2 = c > prev['Open']
-        cond3 = low > prev_rng * 0.35 # era 0.30
-        if not (cond1 and cond2 and cond3): return None
-        return "CALL", round(ratio,1), int(close_pos*100)
-
-    if up >= body*RATIO_MIN: # PUT
-        ratio = up/body
-        if not (RATIO_MIN <= ratio <= RATIO_MAX): return None
-        if low > rng*WICK_MAX: return None
-        if not (ema9 < ema21 and c < ema50): return None
-        if not (RSI_MIN <= rsi <= RSI_MAX): return None
-        if close_pos > 0.38: return None # era 0.40
-        if dist_ema200 > 0.006: return None
-
-        cond1 = prev['Close'] > prev['Open'] or (prev['High'] > prev2['High'] and prev_close_pos < 0.5)
-        cond2 = c < prev['Open']
-        cond3 = up > prev_rng * 0.35
-        if not (cond1 and cond2 and cond3): return None
-        return "PUT", round(ratio,1), int(close_pos*100)
-    return None
-
-def analizza():
-    now_ts = datetime.now().timestamp()
-    pool = [(t,"REAL",REAL_MAP[t]) for t in REAL_LIST] + [(t,"OTC",OTC_MAP[t]) for t in OTC_LIST]
-    random.shuffle(pool)
-    for ticker, tipo, nome in pool:
-        key = f"{ticker}_{tipo}"
-        if key in ultimo_segnali and now_ts - ultimo_segnali[key] < COOLDOWN: continue
+def scan():
+    for symbol in PAIRS:
         try:
-            df = yf.Ticker(ticker, session=session).history(period="5d", interval="5m")
+            df = yf.download(symbol, period="5d", interval="15m", progress=False)
+            df = fix_df(df)
             if len(df) < 210: continue
-            cl = df['Close']
-            ema9, ema21, ema50, ema200 = cl.ewm(span=9).mean().iloc[-1], cl.ewm(span=21).mean().iloc[-1], cl.ewm(span=50).mean().iloc[-1], cl.ewm(span=200).mean().iloc[-1]
-            delta = cl.diff()
-            gain = delta.where(delta>0,0).rolling(14).mean()
-            loss = -delta.where(delta<0,0).rolling(14).mean()
-            rsi = 100 - (100/(1+gain/loss))
-            last_rsi = float(rsi.iloc[-1])
-            row, prev, prev2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-            avg_rng = (df['High'] - df['Low']).rolling(20).mean().iloc[-1]
-            if (row['High'] - row['Low']) < avg_rng * VOL_MULT: continue
-            res = is_pinbar_doppia_conferma(row['Open'],row['High'],row['Low'],row['Close'], ema9, ema21, ema50, ema200, last_rsi, prev, prev2)
-            if res:
-                d, ratio, close_pos = res
-                ultimo_segnali[key] = now_ts
-                return nome, tipo, d, last_rsi, ratio, close_pos
-        except: continue
-    return None
+            df['e20'] = df['Close'].ewm(span=20).mean()
+            df['e200'] = df['Close'].ewm(span=200).mean()
+            df['rsi'] = rsi(df['Close'])
+            df['atr'] = atr(df, 14)
+            df['atr_ma50'] = df['atr'].rolling(50).mean()
+            df['stoch_k'], _ = stochastic(df)
+            
+            last = df.iloc[-1]
+            clean = symbol.replace("=X","")
+            price = float(last['Close'])
+            rsi_val = float(last['rsi'])
+            stoch_k = float(last['stoch_k'])
 
-async def bot_loop():
-    ora = datetime.now(ROMA).strftime('%H:%M:%S')
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"✅ POCKET V1.1 MEDIO + DOPPIA CONFERMA\nStretto un pelo | Body 9-33% 2.3x | RSI 30-70 | {ora} IT")
+            # SOLO PELO PELO MODIFICATO
+            if last['atr'] < last['atr_ma50'] * 0.45: continue
+            if last['atr'] > last['atr_ma50'] * 3.2: continue
+
+            tocco_e20 = abs(price - float(last['e20'])) / price < 0.004
+            signal = None
+            if price > float(last['e200']) and tocco_e20 and 20 <= rsi_val <= 60 and stoch_k < 32:
+                signal = "BUY"
+            if price < float(last['e200']) and tocco_e20 and 40 <= rsi_val <= 80 and stoch_k > 68:
+                signal = "SELL"
+
+            if signal:
+                if any(p['symbol']==clean for p in pending): continue
+                send(f"🎯 L4 PELO {signal} {clean} RSI {rsi_val:.1f} Entry {price:.5f}")
+                pending.append({"symbol": clean, "signal": signal, "entry": price, "time": time.time()})
+        except Exception as e:
+            print(f"err {symbol} {e}")
+            continue
+
+def check_results():
+    now = time.time()
+    for p in pending[:]:
+        if now - p['time'] < 900: continue
+        try:
+            df = yf.download(p['symbol']+"=X", period="1d", interval="1m", progress=False)
+            df = fix_df(df)
+            if len(df)==0: continue
+            curr = float(df['Close'].iloc[-1])
+            win = (p['signal']=="BUY" and curr > p['entry']) or (p['signal']=="SELL" and curr < p['entry'])
+            send(f"{'WIN ✅' if win else 'LOSS ❌'} L4 {p['signal']} {p['symbol']}")
+            pending.remove(p)
+        except: pass
+
+def loop():
+    send(f"🚀 V61.0.1 PELO PELO - {len(PAIRS)} coppie reali")
     while True:
-        await asyncio.sleep(60)
-        res = analizza()
-        ora = datetime.now(ROMA).strftime('%H:%M:%S')
-        if res:
-            nome, tipo, direz, rsi, ratio, close_pos = res
-            emoji = "🟢" if direz=="CALL" else "🔴"
-            tag = "🏦 REAL" if tipo=="REAL" else "🔶 OTC"
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} 5m - {direz} {tag}\n✅ V1.1 | {ratio}x | Close {close_pos}% | RSI {rsi:.0f} | {ora} IT")
+        try:
+            scan()
+            check_results()
+        except: pass
+        time.sleep(60)
 
-def start_bot(): asyncio.run(bot_loop())
+threading.Thread(target=loop, daemon=True).start()
+
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
-    start_bot()
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
