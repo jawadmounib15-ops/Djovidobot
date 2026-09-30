@@ -12,7 +12,7 @@ bot = Bot(token=TELEGRAM_TOKEN)
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return "Bot POCKET V1 LARGO + DOPPIA CONFERMA ON"
+def home(): return "Bot POCKET V1.1 MEDIO + DOPPIA CONFERMA ON"
 def run_flask(): app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
 REAL_MAP = {
@@ -25,12 +25,13 @@ REAL_LIST, OTC_LIST = list(REAL_MAP.keys()), list(REAL_MAP.keys())
 session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
 
-BODY_MIN, BODY_MAX = 0.07, 0.38
-RATIO_MIN, RATIO_MAX = 2.0, 10.0
-WICK_MAX = 0.40
-RSI_MIN, RSI_MAX = 25, 75
+# === V1.1 STRETTO UN PELINO ===
+BODY_MIN, BODY_MAX = 0.09, 0.33 # era 0.07-0.38
+RATIO_MIN, RATIO_MAX = 2.3, 9.0 # era 2.0-10.0
+WICK_MAX = 0.35 # era 0.40
+RSI_MIN, RSI_MAX = 30, 70 # era 25-75
 COOLDOWN = 300
-VOL_MULT = 0.50
+VOL_MULT = 0.60 # era 0.50
 
 ultimo_segnali = {}
 
@@ -42,7 +43,6 @@ def is_pinbar_doppia_conferma(o,h,l,c, ema9, ema21, ema50, ema200, rsi, prev, pr
     close_pos = (c - l) / rng
     dist_ema200 = abs(c - ema200)/ema200 if ema200 else 0
 
-    # prev data
     prev_body = abs(prev['Close']-prev['Open'])
     prev_rng = prev['High']-prev['Low']
     prev_close_pos = (prev['Close']-prev['Low'])/prev_rng if prev_rng>0 else 0.5
@@ -53,18 +53,13 @@ def is_pinbar_doppia_conferma(o,h,l,c, ema9, ema21, ema50, ema200, rsi, prev, pr
         if up > rng*WICK_MAX: return None
         if not (ema9 > ema21 and c > ema50): return None
         if not (RSI_MIN <= rsi <= RSI_MAX): return None
-        if close_pos < 0.60: return None
-        if dist_ema200 > 0.008: return None
+        if close_pos < 0.62: return None # era 0.60
+        if dist_ema200 > 0.006: return None # era 0.008
 
-        # === DOPPIA CONFERMA CALL ===
-        # 1) prev deve essere rossa o con wick basso (rimbalzo)
-        # 2) RSI deve stare risalendo (rsi > rsi prev)
-        # 3) close attuale > open prev (ripresa)
         cond1 = prev['Close'] < prev['Open'] or (prev['Low'] < prev2['Low'] and prev_close_pos > 0.5)
-        cond2 = c > prev['Open'] # engulf parziale
-        cond3 = low > prev_rng * 0.3 # wick deve essere più lungo della prev
-        if not (cond1 and cond2): return None
-        if not cond3: return None
+        cond2 = c > prev['Open']
+        cond3 = low > prev_rng * 0.35 # era 0.30
+        if not (cond1 and cond2 and cond3): return None
         return "CALL", round(ratio,1), int(close_pos*100)
 
     if up >= body*RATIO_MIN: # PUT
@@ -73,15 +68,13 @@ def is_pinbar_doppia_conferma(o,h,l,c, ema9, ema21, ema50, ema200, rsi, prev, pr
         if low > rng*WICK_MAX: return None
         if not (ema9 < ema21 and c < ema50): return None
         if not (RSI_MIN <= rsi <= RSI_MAX): return None
-        if close_pos > 0.40: return None
-        if dist_ema200 > 0.008: return None
+        if close_pos > 0.38: return None # era 0.40
+        if dist_ema200 > 0.006: return None
 
-        # === DOPPIA CONFERMA PUT ===
         cond1 = prev['Close'] > prev['Open'] or (prev['High'] > prev2['High'] and prev_close_pos < 0.5)
         cond2 = c < prev['Open']
-        cond3 = up > prev_rng * 0.3
-        if not (cond1 and cond2): return None
-        if not cond3: return None
+        cond3 = up > prev_rng * 0.35
+        if not (cond1 and cond2 and cond3): return None
         return "PUT", round(ratio,1), int(close_pos*100)
     return None
 
@@ -115,7 +108,7 @@ def analizza():
 
 async def bot_loop():
     ora = datetime.now(ROMA).strftime('%H:%M:%S')
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"✅ POCKET V1 LARGO + DOPPIA CONFERMA\nPinbar + Prev Engulf | {ora} IT")
+    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"✅ POCKET V1.1 MEDIO + DOPPIA CONFERMA\nStretto un pelo | Body 9-33% 2.3x | RSI 30-70 | {ora} IT")
     while True:
         await asyncio.sleep(60)
         res = analizza()
@@ -124,7 +117,7 @@ async def bot_loop():
             nome, tipo, direz, rsi, ratio, close_pos = res
             emoji = "🟢" if direz=="CALL" else "🔴"
             tag = "🏦 REAL" if tipo=="REAL" else "🔶 OTC"
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} 5m - {direz} {tag}\n✅ Doppia conferma | {ratio}x | Close {close_pos}% | RSI {rsi:.0f} | {ora} IT")
+            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} 5m - {direz} {tag}\n✅ V1.1 | {ratio}x | Close {close_pos}% | RSI {rsi:.0f} | {ora} IT")
 
 def start_bot(): asyncio.run(bot_loop())
 if __name__ == "__main__":
