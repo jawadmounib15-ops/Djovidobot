@@ -1,8 +1,9 @@
-# analyzer.py - FILE UNICO con app dentro + PINBAR PERFETTA
+# analyzer.py - CON BOTTONE E SUONO - COME PRIMA
 import os, time, threading, requests
-from flask import Flask
+from flask import Flask, jsonify
 import yfinance as yf
 import pandas as pd
+from datetime import datetime
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
@@ -10,19 +11,15 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","EURNZD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","GBPCAD=X","GBPNZD=X","AUDJPY=X","AUDCAD=X","AUDCHF=X","AUDNZD=X","CADJPY=X","CADCHF=X","CHFJPY=X","NZDJPY=X","NZDCAD=X","NZDCHF=X"]
 
 app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "V64 PINBAR PERFETTA LIVE - analyzer:app OK"
+last_signals = []
+scan_status = {"last_scan": "Mai", "count": 0}
 
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     return df
-
 def rsi(s,p=14):
     d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
     return 100-(100/(1+g/l))
-
 def ema(s,p): return s.ewm(span=p).mean()
 
 def is_perfect_pinbar(o,h,l,c,rsi_val,dist_ema20,prev_high,prev_low):
@@ -45,7 +42,9 @@ def is_perfect_pinbar(o,h,l,c,rsi_val,dist_ema20,prev_high,prev_low):
         if l>prev_low*1.0005: return None
         return "BUY", round(low/body,1)
 
-def scan():
+def do_scan():
+    global last_signals, scan_status
+    res=[]
     for symbol in PAIRS:
         try:
             df=yf.download(symbol, period="5d", interval="5m", progress=False)
@@ -57,13 +56,71 @@ def scan():
             pin=is_perfect_pinbar(last['Open'],last['High'],last['Low'],last['Close'],rsi_v,dist,prev_h,prev_l)
             if pin:
                 sig,ratio=pin
-                requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":f"{'🔴' if sig=='SELL' else '🟢'} {symbol.replace('=X','')} {sig} PINBAR PERFETTA {ratio}x | RSI {rsi_v:.0f}"}, timeout=10)
+                item={"symbol":symbol.replace('=X',''),"signal":sig,"ratio":f"{ratio}x","price":round(float(last['Close']),5),"rsi":round(rsi_v,1),"time":datetime.now().strftime("%H:%M:%S")}
+                res.append(item)
+                try:
+                    if TOKEN and CHAT_ID:
+                        requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":f"{'🔴' if sig=='SELL' else '🟢'} {item['symbol']} {sig} PERFETTA {ratio}x RSI {rsi_v:.0f}"}, timeout=5)
+                except: pass
         except: continue
+    last_signals=res
+    scan_status={"last_scan":datetime.now().strftime("%H:%M:%S"),"count":len(res)}
+    return res
+
+@app.route('/')
+def home():
+    return """
+<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Pinbar Analyzer</title>
+<style>
+body{background:#0f0f0f;color:#fff;font-family:Arial;padding:20px;text-align:center}
+button{background:#00ff88;color:#000;border:none;padding:15px 30px;font-size:18px;border-radius:10px;font-weight:bold;margin:10px;cursor:pointer}
+button.active{background:#ff0044;color:#fff}
+.card{background:#1e1e1e;padding:15px;margin:10px;border-radius:10px;border-left:5px solid #00ff88}
+.sell{border-left-color:#ff4444}.buy{border-left-color:#00ff88}
+#log{margin-top:20px;font-size:14px;color:#aaa}
+</style></head><body>
+<h2>🔥 PINBAR PERFETTA V64</h2>
+<button id="soundBtn" onclick="toggleSound()">🔇 ATTIVA SUONO</button>
+<button onclick="manualScan()">🔍 SCAN ORA</button>
+<div id="status">Ultima scansione: Mai</div>
+<div id="signals"></div>
+<div id="log"></div>
+<script>
+let soundOn=false; let audio=new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+function toggleSound(){soundOn=!soundOn; let b=document.getElementById('soundBtn'); if(soundOn){b.textContent='🔊 SUONO ATTIVO'; b.classList.add('active'); audio.play().catch(()=>{});} else {b.textContent='🔇 ATTIVA SUONO'; b.classList.remove('active');} }
+function manualScan(){fetch('/api/scan').then(r=>r.json()).then(d=>updateUI(d));}
+function updateUI(data){
+ document.getElementById('status').innerText='Ultima: '+data.status.last_scan+' - Trovate: '+data.status.count;
+ let div=document.getElementById('signals'); div.innerHTML='';
+ data.signals.forEach(s=>{
+   let c=document.createElement('div'); c.className='card '+(s.signal=='SELL'?'sell':'buy');
+   c.innerHTML='<b>'+s.symbol+'</b> - '+s.signal+' PERFETTA<br>Ratio: '+s.ratio+' | RSI: '+s.rsi+'<br>Prezzo: '+s.price+'<br><small>'+s.time+'</small>';
+   div.appendChild(c);
+ });
+ if(data.signals.length>0 && soundOn){audio.play().catch(()=>{}); if('vibrate' in navigator) navigator.vibrate(500);}
+}
+setInterval(()=>{fetch('/api/signals').then(r=>r.json()).then(d=>updateUI(d));}, 30000);
+fetch('/api/signals').then(r=>r.json()).then(d=>updateUI(d));
+</script></body></html>
+"""
+
+@app.route('/api/signals')
+def api_signals():
+    return jsonify({"signals": last_signals, "status": scan_status})
+
+@app.route('/api/scan')
+def api_scan():
+    res=do_scan()
+    return jsonify({"signals": res, "status": scan_status})
 
 def loop():
-    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":"🚀 V64 ATTIVO analyzer:app - Pinbar Perfetta"}, timeout=10)
+    try:
+        if TOKEN and CHAT_ID: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":"🚀 ANALYZER CON BOTTONE ATTIVO"}, timeout=5)
     except: pass
     while True:
-        scan(); time.sleep(60)
+        try: do_scan()
+        except: pass
+        time.sleep(60)
 
 threading.Thread(target=loop, daemon=True).start()
