@@ -1,142 +1,69 @@
-# analyzer.py - PINBAR PERFETTA + RSI + EMA come nelle tue foto
+# analyzer.py - FILE UNICO con app dentro + PINBAR PERFETTA
+import os, time, threading, requests
+from flask import Flask
+import yfinance as yf
 import pandas as pd
 
-def rsi_calc(series, period=14):
-    delta = series.diff()
-    gain = delta.where(delta>0, 0).rolling(period).mean()
-    loss = -delta.where(delta<0, 0).rolling(period).mean()
-    rs = gain / loss
-    return 100 - (100/(1+rs))
+TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
 
-def ema(series, period):
-    return series.ewm(span=period).mean()
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","EURNZD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","GBPCAD=X","GBPNZD=X","AUDJPY=X","AUDCAD=X","AUDCHF=X","AUDNZD=X","CADJPY=X","CADCHF=X","CHFJPY=X","NZDJPY=X","NZDCAD=X","NZDCHF=X"]
 
-def is_perfect_pinbar(o, h, l, c, rsi_val=None, price_vs_ema200=None, dist_ema20=None):
-    body = abs(c - o)
-    rng = h - l
-    if rng == 0 or body == 0:
-        return None
+app = Flask(__name__)
 
-    up = h - max(o, c)
-    low = min(o, c) - l
-    close_pos = (c - l) / rng
-    body_pct = body / rng
+@app.route('/')
+def home():
+    return "V64 PINBAR PERFETTA LIVE - analyzer:app OK"
 
-    # 1. Body 5-30% come foto
-    if not (0.05 <= body_pct <= 0.30):
-        return None
+def fix_df(df):
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    return df
 
-    # 2. Wick 2.8x minimo
-    dominant = max(up, low)
-    if dominant < body * 2.8:
-        return None
+def rsi(s,p=14):
+    d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
+    return 100-(100/(1+g/l))
 
-    # 3. Wick 55% candela
-    if dominant < rng * 0.55:
-        return None
+def ema(s,p): return s.ewm(span=p).mean()
 
-    # 4. Wick opposto max 30%
-    opposite = min(up, low)
-    if opposite > rng * 0.30:
-        return None
+def is_perfect_pinbar(o,h,l,c,rsi_val,dist_ema20,prev_high,prev_low):
+    body=abs(c-o); rng=h-l
+    if rng==0 or body==0: return None
+    up=h-max(o,c); low=min(o,c)-l
+    close_pos=(c-l)/rng; body_pct=body/rng
+    if not (0.05<=body_pct<=0.30): return None
+    dom=max(up,low)
+    if dom<body*2.8 or dom<rng*0.55: return None
+    if min(up,low)>rng*0.30: return None
+    if rsi_val and not (30<=rsi_val<=72): return None
+    if dist_ema20 and dist_ema20>0.012: return None
+    if up>low:
+        if close_pos>0.40: return None
+        if h<prev_high*0.9995: return None
+        return "SELL", round(up/body,1)
+    else:
+        if close_pos<0.60: return None
+        if l>prev_low*1.0005: return None
+        return "BUY", round(low/body,1)
 
-    # 5. FILTRO RSI come nelle tue foto (non estremo)
-    if rsi_val is not None:
-        if not (30 <= rsi_val <= 72): # foto era 50-65
-            return None
+def scan():
+    for symbol in PAIRS:
+        try:
+            df=yf.download(symbol, period="5d", interval="5m", progress=False)
+            df=fix_df(df)
+            if len(df)<210: continue
+            df['RSI']=rsi(df['Close']); df['EMA20']=ema(df['Close'],20)
+            last=df.iloc[-1]; prev_h=df['High'].iloc[-11:-1].max(); prev_l=df['Low'].iloc[-11:-1].min()
+            rsi_v=float(last['RSI']); dist=abs(float(last['Close'])-float(last['EMA20']))/float(last['Close'])
+            pin=is_perfect_pinbar(last['Open'],last['High'],last['Low'],last['Close'],rsi_v,dist,prev_h,prev_l)
+            if pin:
+                sig,ratio=pin
+                requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":f"{'🔴' if sig=='SELL' else '🟢'} {symbol.replace('=X','')} {sig} PINBAR PERFETTA {ratio}x | RSI {rsi_v:.0f}"}, timeout=10)
+        except: continue
 
-    # 6. FILTRO EMA come nelle foto
-    if dist_ema20 is not None:
-        if dist_ema20 > 0.012: # max 1.2% da EMA20, altrimenti troppo lontana
-            return None
+def loop():
+    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":"🚀 V64 ATTIVO analyzer:app - Pinbar Perfetta"}, timeout=10)
+    except: pass
+    while True:
+        scan(); time.sleep(60)
 
-    if up > low: # SHOOTING STAR SELL - come foto 1.88463 e 1.32906
-        if close_pos > 0.40:
-            return None
-        if price_vs_ema200 is not None and price_vs_ema200 < 0:
-            # nelle foto era sopra EMA200, ma dopo scarico - permetto ma meglio sopra
-            pass
-        signal = "SELL"
-        ratio = up / body
-        return {
-            "signal": signal,
-            "type": "SHOOTING_STAR",
-            "ratio": round(ratio,1),
-            "body_pct": round(body_pct*100,1),
-            "rsi": round(rsi_val,1) if rsi_val else None,
-            "quality": "PERFETTA" if ratio>=3.5 else "BELLISSIMA"
-        }
-    else: # HAMMER BUY
-        if close_pos < 0.60:
-            return None
-        signal = "BUY"
-        ratio = low / body
-        return {
-            "signal": signal,
-            "type": "HAMMER",
-            "ratio": round(ratio,1),
-            "body_pct": round(body_pct*100,1),
-            "rsi": round(rsi_val,1) if rsi_val else None,
-            "quality": "PERFETTA" if ratio>=3.5 else "BELLISSIMA"
-        }
-
-def analyze(df):
-    """Analizza DataFrame con RSI + EMA come nelle foto"""
-    signals = []
-    if len(df) < 210:
-        return signals
-
-    df['RSI'] = rsi_calc(df['Close'])
-    df['EMA20'] = ema(df['Close'], 20)
-    df['EMA200'] = ema(df['Close'], 200)
-
-    for i in range(200, len(df)):
-        o = df['Open'].iloc[i]
-        h = df['High'].iloc[i]
-        l = df['Low'].iloc[i]
-        c = df['Close'].iloc[i]
-        rsi_val = float(df['RSI'].iloc[i])
-
-        # distanza da EMA20
-        ema20 = float(df['EMA20'].iloc[i])
-        dist_ema20 = abs(c - ema20) / c
-
-        # vs EMA200
-        ema200 = float(df['EMA200'].iloc[i])
-        price_vs_ema200 = c - ema200
-
-        prev_high = df['High'].iloc[i-10:i].max()
-        prev_low = df['Low'].iloc[i-10:i].min()
-
-        # deve essere massimo/minimo locale come foto
-        if h < prev_high * 0.9995 and l > prev_low * 1.0005:
-            continue
-
-        pin = is_perfect_pinbar(o, h, l, c, rsi_val, price_vs_ema200, dist_ema20)
-        if pin:
-            pin['index'] = i
-            pin['time'] = str(df.index[i])
-            pin['price'] = float(c)
-            pin['ema20_dist'] = round(dist_ema20*100,2)
-            signals.append(pin)
-
-    return signals
-
-def scan_last_candle(df):
-    """Live - ultima candela con filtri foto"""
-    if len(df) < 210:
-        return None
-
-    df['RSI'] = rsi_calc(df['Close'])
-    df['EMA20'] = ema(df['Close'], 20)
-    df['EMA200'] = ema(df['Close'], 200)
-
-    last = df.iloc[-1]
-    rsi_val = float(last['RSI'])
-    dist_ema20 = abs(float(last['Close']) - float(last['EMA20'])) / float(last['Close'])
-    vs_ema200 = float(last['Close']) - float(last['EMA200'])
-
-    return is_perfect_pinbar(
-        last['Open'], last['High'], last['Low'], last['Close'],
-        rsi_val, vs_ema200, dist_ema20
-    )
+threading.Thread(target=loop, daemon=True).start()
