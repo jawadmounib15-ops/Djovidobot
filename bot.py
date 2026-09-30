@@ -1,112 +1,135 @@
-import os, asyncio, threading, random
-from flask import Flask
-from telegram import Bot
+# bot.py - LARGO POI STRINGIAMO - CONFIG IN ALTO
+from flask import Flask, render_template_string
+import threading, time, os, pytz, pandas as pd
 from datetime import datetime
-import pytz
-import yfinance as yf
-from curl_cffi import requests as cffi_requests
+from curl_cffi import requests as crequests
+import requests as req
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-bot = Bot(token=TELEGRAM_TOKEN)
 app = Flask(__name__)
-@app.route('/')
-def home(): return "Bot POCKET 5m V2.1 STRETTO 1 FILTRO ON"
-
-def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
-
-YAHOO_MAP = {
-    "EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","AUDUSD=X":"AUD/USD",
-    "USDJPY=X":"USD/JPY","EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY",
-    "AUDJPY=X":"AUD/JPY","EURGBP=X":"EUR/GBP","AUDCAD=X":"AUD/CAD","AUDCHF=X":"AUD/CHF"
-}
-COPPIE = list(YAHOO_MAP.keys())
-session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
-ultimo_segnali = {}
 
-def is_pinbar_filtrata(o,h,l,c, ema9, ema21, ema50, rsi, df):
-    body = abs(c - o)
-    rng = h - l
-    if rng==0: return None
-    up = h - max(o,c)
-    low = min(o,c) - l
+# === CONFIG CHE STRINGIAMO PIANO PIANO ===
+NOSE_MIN_H4 = 58 # poi 60, 65, 70
+BODY_MAX_H4 = 38 # poi 35, 30, 25
+NOSE_MIN_M5 = 55 # poi 58, 60, 65
+BODY_MAX_M5 = 40 # poi 38, 35, 30
+TOLLERANZA_FUORI = 0.20 # quanto lasciamo uscire il body dalla prev: 0.20=20% poi 0.15, 0.10, 0.00
 
-    # Stretto un pelo: era 10-28% ora 12-25%
-    if body < rng * 0.12: return None
-    if body > rng * 0.25: return None
-    if min(up,low) > rng * 0.18: return None
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
-    # --- UNICO FILTRO NUOVO: SPORGENZA ---
-    prev_low = df['Low'].iloc[-11:-1].min()
-    prev_high = df['High'].iloc[-11:-1].max()
-    sporge_bull = l < prev_low * 0.999
-    sporge_bear = h > prev_high * 1.001
-    if not (sporge_bull or sporge_bear):
-        return None
+COPPIE = ["EURUSD=X","GBPUSD=X","USDJPY=X","EURJPY=X","GBPJPY=X","AUDUSD=X","USDCAD=X","NZDUSD=X","EURGBP=X","USDCHF=X"]
+NOMI = {"EURUSD=X":"EUR/USD","GBPUSD=X":"GBP/USD","USDJPY=X":"USD/JPY","EURJPY=X":"EUR/JPY","GBPJPY=X":"GBP/JPY","AUDUSD=X":"AUD/USD","USDCAD=X":"USD/CAD","NZDUSD=X":"NZD/USD","EURGBP=X":"EUR/GBP","USDCHF=X":"USD/CHF"}
 
-    if low >= body*2.6:
-        ratio = low/body
-        if ratio > 6.5: return None # era 8x ora 6.5x
-        if up > rng*0.20: return None
-        if not (ema9 > ema21 and c > ema50): return None
-        if not (42 <= rsi <= 58): return None
-        return "CALL", round(ratio,1)
+HTML = """<html><head><meta name="viewport" content="width=device-width"><title>LARGO->STRETTO</title>
+<style>
+body{background:#0e0e0e;color:#fff;font-family:Arial;padding:15px}
+.card{background:#1a1a1a;padding:16px;border-radius:16px;margin-top:14px}
+.h4{border-left:5px solid #00ff88}.m5{border-left:5px solid #ffcc00}
+.safe{border:1px solid #00ff88;border-radius:12px;padding:10px;text-align:center;color:#00ff88}
+small{color:#aaa;font-size:12px;white-space:pre-wrap}
+.bull{color:#00ff88}.bear{color:#ff5555}
+</style></head><body>
+<h2>📌 LARGO -> STRINGIAMO H4 {{s1}}% / M5 {{s2}}%</h2>
+<div class="safe">NOSE H4 {{nh4}}% M5 {{nm5}}% | TOL {{tol}}% | LIVE {{live}}/10 | TG {{tg}}</div>
+<div class="card h4"><b>LAVORO 1 - H4 4H</b><br><div style="font-size:18px" class="{{c1}}">{{sig1}}</div><small>{{det1}}</small></div>
+<div class="card m5"><b>LAVORO 2 - M5 30M</b><br><div style="font-size:18px" class="{{c2}}">{{sig2}}</div><small>{{det2}}</small><br><small>{{debug}}</small></div>
+<div style="color:#555;margin-top:8px">{{ora}}</div>
+<script>setTimeout(()=>location.reload(),20000)</script></body></html>"""
 
-    if up >= body*2.6:
-        ratio = up/body
-        if ratio > 6.5: return None
-        if low > rng*0.20: return None
-        if not (ema9 < ema21 and c < ema50): return None
-        if not (42 <= rsi <= 58): return None
-        return "PUT", round(ratio,1)
+def send_tg(txt):
+    if not TOKEN or not CHAT_ID: return False
+    try:
+        r=req.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage", data={"chat_id":CHAT_ID,"text":txt,"parse_mode":"Markdown"}, timeout=15)
+        print(r.text[:200]); return r.status_code==200
+    except Exception as e: print(e); return False
 
-    return None
+def ema(s,n): return s.ewm(span=n).mean()
+def get_df(ticker, interval, range_):
+    try:
+        url=f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval={interval}&range={range_}"
+        r=crequests.get(url, impersonate="chrome110", timeout=20)
+        j=r.json()
+        if j['chart']['result'] is None: return pd.DataFrame()
+        res=j['chart']['result'][0]; ts=res['timestamp']; q=res['indicators']['quote'][0]
+        df=pd.DataFrame({"Open":q['open'],"High":q['high'],"Low":q['low'],"Close":q['close']}, index=pd.to_datetime(ts,unit='s')).dropna()
+        return df
+    except: return pd.DataFrame()
 
-def analizza():
-    now_ts = datetime.now().timestamp()
-    for coppia in random.sample(COPPIE, len(COPPIE)):
-        if coppia in ultimo_segnali and now_ts - ultimo_segnali[coppia] < 900:
-            continue
-        try:
-            df = yf.Ticker(coppia, session=session).history(period="5d", interval="5m")
-            if len(df) < 60: continue
-            cl = df['Close']
-            ema9 = cl.ewm(span=9).mean().iloc[-1]
-            ema21 = cl.ewm(span=21).mean().iloc[-1]
-            ema50 = cl.ewm(span=50).mean().iloc[-1]
-            delta = cl.diff()
-            gain = delta.where(delta>0,0).rolling(14).mean()
-            loss = -delta.where(delta<0,0).rolling(14).mean()
-            rsi = 100 - (100/(1+gain/loss))
-            last_rsi = float(rsi.iloc[-1])
-            row = df.iloc[-1]
-            avg_rng = (df['High'] - df['Low']).rolling(20).mean().iloc[-1]
-            if (row['High'] - row['Low']) < avg_rng * 0.80: continue
-            res = is_pinbar_filtrata(row['Open'],row['High'],row['Low'],row['Close'], ema9, ema21, ema50, last_rsi, df)
-            if res:
-                d, ratio = res
-                ultimo_segnali[coppia] = now_ts
-                return YAHOO_MAP[coppia], d, last_rsi, ratio
-        except: continue
-    return None
+def is_pinbar(last, prev, nose_min, body_max):
+    O,H,L,C=float(last['Open']),float(last['High']),float(last['Low']),float(last['Close'])
+    Ph,Pl=float(prev['High']),float(prev['Low'])
+    body=abs(C-O); rng=H-L
+    if rng==0: return False,"",0,0
+    upper=H-max(O,C); lower=min(O,C)-L
+    nose=max(upper,lower); nose_pct=nose/rng*100; body_pct=body/rng*100
+    if nose_pct < nose_min: return False,"",nose_pct,body_pct
+    if body_pct > body_max: return False,"",nose_pct,body_pct
+    tol=rng*TOLLERANZA_FUORI
+    if min(O,C) < Pl - tol: return False,"",nose_pct,body_pct
+    if max(O,C) > Ph + tol: return False,"",nose_pct,body_pct
+    tipo="BULLISH" if lower>upper else "BEARISH"
+    if tipo=="BULLISH" and C < L+rng*0.50: return False,"",nose_pct,body_pct
+    if tipo=="BEARISH" and C > L+rng*0.50: return False,"",nose_pct,body_pct
+    return True,tipo,nose_pct,body_pct
 
-async def bot_loop():
-    ora = datetime.now(ROMA).strftime('%H:%M:%S')
-    await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"✅ POCKET 5m V2.1 STRETTO 1 FILTRO\nBody 12-25% Ratio max 6.5x + Sporgenza\n{ora} IT")
+stato={"sig1":"Avvio...","det1":"...","c1":"","s1":0,"sig2":"Avvio...","det2":"...","c2":"","s2":0,"live":0,"tg":"ON" if TOKEN else "OFF","debug":"..."}
+last_h4=""; last_m5=""
+
+def lavoro_h4():
+    global last_h4
     while True:
-        await asyncio.sleep(90)
-        res = analizza()
-        ora = datetime.now(ROMA).strftime('%H:%M:%S')
-        if res:
-            nome, direz, rsi, ratio = res
-            emoji = "🟢" if direz=="CALL" else "🔴"
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"{emoji} {nome} 5m - {direz}\nREAL: {nome} | OTC: {nome} OTC\nV2.1 {ratio}x | RSI {rsi:.0f} | Sporgenza OK | {ora} IT")
+        try:
+            live=0
+            for cp in COPPIE:
+                df=get_df(cp,"240m","60d")
+                if df.empty or len(df)<50: continue
+                live+=1; df['EMA21']=ema(df['Close'],21)
+                ok,tipo,nose,body=is_pinbar(df.iloc[-1],df.iloc[-2],NOSE_MIN_H4,BODY_MAX_H4)
+                if not ok: continue
+                # filtro largo: basta vicino EMA
+                if tipo=="BULLISH" and df.iloc[-1]['Close'] < df.iloc[-1]['EMA21']*0.997: continue
+                if tipo=="BEARISH" and df.iloc[-1]['Close'] > df.iloc[-1]['EMA21']*1.003: continue
+                sig=f"{NOMI[cp]} {tipo} - {'CALL 4h' if tipo=='BULLISH' else 'PUT 4h'}"
+                stato.update({"sig1":sig,"det1":f"Naso {nose:.0f}% Body {body:.0f}% (min {NOSE_MIN_H4}%)","c1":"bull" if tipo=="BULLISH" else "bear","s1":int(nose),"live":live})
+                if sig!=last_h4: send_tg(f"🟢 *H4 LARGO {nose:.0f}%*\n📊 {NOMI[cp]} {tipo}\n⏰ {sig}"); last_h4=sig
+                break
+            else: stato["sig1"]=f"{live}/10 - Nessuna H4 con {NOSE_MIN_H4}%"; stato["s1"]=0
+        except Exception as e: stato["det1"]=str(e)[:120]
+        time.sleep(80)
 
-def start_bot():
-    asyncio.run(bot_loop())
+def lavoro_m5():
+    global last_m5
+    while True:
+        try:
+            for cp in COPPIE:
+                df_h4=get_df(cp,"240m","60d"); df_h1=get_df(cp,"60m","20d"); df_m5=get_df(cp,"5m","5d")
+                if df_h4.empty or df_h1.empty or df_m5.empty: continue
+                df_h4['EMA21']=ema(df_h4['Close'],21); df_h1['EMA21']=ema(df_h1['Close'],21); df_m5['EMA21']=ema(df_m5['Close'],21)
+                ok,tipo,nose,body=is_pinbar(df_m5.iloc[-1],df_m5.iloc[-2],NOSE_MIN_M5,BODY_MAX_M5)
+                if not ok: continue
+                up_h4=df_h4.iloc[-1]['Close']>df_h4.iloc[-1]['EMA21']; up_h1=df_h1.iloc[-1]['Close']>df_h1.iloc[-1]['EMA21']
+                down_h4=df_h4.iloc[-1]['Close']<df_h4.iloc[-1]['EMA21']; down_h1=df_h1.iloc[-1]['Close']<df_h1.iloc[-1]['EMA21']
+                if tipo=="BULLISH" and not (up_h4 and up_h1): continue
+                if tipo=="BEARISH" and not (down_h4 and down_h1): continue
+                sig=f"{NOMI[cp]} {tipo} - {'CALL 30m' if tipo=='BULLISH' else 'PUT 30m'}"
+                stato.update({"sig2":sig,"det2":f"Naso {nose:.0f}% Body {body:.0f}% (min {NOSE_MIN_M5}%) Fila H4/H1 OK","c2":"bull" if tipo=="BULLISH" else "bear","s2":int(nose)})
+                if sig!=last_m5: send_tg(f"🟡 *M5 LARGO {nose:.0f}%*\n📊 {NOMI[cp]} {tipo}\n📈 H4 {'UP' if up_h4 else 'DOWN'} H1 {'UP' if up_h1 else 'DOWN'}\n⏰ {sig}"); last_m5=sig
+                break
+            else: stato["sig2"]=f"Nessuna M5 con {NOSE_MIN_M5}%"; stato["s2"]=0
+        except Exception as e: stato["debug"]=str(e)[:120]
+        time.sleep(50)
 
-if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
-    start_bot()
+if TOKEN and CHAT_ID:
+    send_tg(f"✅ *BOT LARGO AVVIATO*\nH4 min {NOSE_MIN_H4}% | M5 min {NOSE_MIN_M5}% | Tol {TOLLERANZA_FUORI*100:.0f}%\nOra dovrebbe mandare più segnali")
+
+threading.Thread(target=lavoro_h4, daemon=True).start()
+threading.Thread(target=lavoro_m5, daemon=True).start()
+
+@app.route('/')
+def home():
+    ora=datetime.now(ROMA).strftime('%H:%M:%S')
+    return render_template_string(HTML, sig1=stato["sig1"], det1=stato["det1"], c1=stato["c1"], s1=stato["s1"], sig2=stato["sig2"], det2=stato["det2"], c2=stato["c2"], s2=stato["s2"], live=stato["live"], tg=stato["tg"], debug=stato["debug"], ora=ora, nh4=NOSE_MIN_H4, nm5=NOSE_MIN_M5, tol=int(TOLLERANZA_FUORI*100))
+
+if __name__=="__main__":
+    app.run(host='0.0.0.0',port=int(os.environ.get("PORT",10000)))
