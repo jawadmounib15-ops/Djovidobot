@@ -41,10 +41,10 @@ def stochastic(df,k=14,d=3):
 def scan():
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=5: break # MAX 5 segnali per giro, non 6
+        if count_this_scan>=4: break # MAX 4 segnali per giro, non 6
         clean=symbol.replace("=X","")
-        # COOLDOWN 10 minuti per coppia
-        if clean in cooldown and time.time()-cooldown[clean] < 600: continue
+        # COOLDOWN 90 minuti per coppia
+        if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
         try:
             df=yf.download(symbol, period="5d", interval="15m", progress=False)
             df=fix_df(df)
@@ -59,18 +59,18 @@ def scan():
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
             # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
-            if last['atr'] < last['atr_ma50']*0.66: continue
-            if last['atr'] > last['atr_ma50']*2.0: continue
+            if last['atr'] < last['atr_ma50']*0.70: continue
+            if last['atr'] > last['atr_ma50']*1.8: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.004 # più stretto 0.3% non 0.4%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.003 # più stretto 0.3% non 0.4%
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue # no flat
 
             signal=None
             # STRETT0: RSI più centrale e stoch più estremo
-            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=38 and stoch_k<15:
+            if price>float(last['e200']) and tocco_e20 and 28<=rsi_v<=39 and stoch_k<15:
                 signal="BUY"
-            if price<float(last['e200']) and tocco_e20 and 60<=rsi_v<=75 and stoch_k>85:
+            if price<float(last['e200']) and tocco_e20 and 60<=rsi_v<=72 and stoch_k>85:
                 signal="SELL"
 
             if signal:
