@@ -84,7 +84,7 @@ def scan():
 def check_results():
     now=time.time()
     for p in pending[:]:
-        if now-p['time'] < 300: continue # controlla dopo 5min non 15
+        if now-p['time'] < 60: continue # controlla dopo 2min 
         try:
             df=yf.download(p['symbol']+"=X", period="1d", interval="1m", progress=False)
             df=fix_df(df)
