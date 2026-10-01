@@ -1,88 +1,91 @@
-# ANALYZER.PY V68 LARGO POCO + STORICO
+# ANALYZER.PY V72 - CROCI + RSI 14 COME DA FOTO
 import yfinance as yf, pandas as pd
 from flask import Flask, jsonify
 from datetime import datetime
-import pytz, os, time
+import pytz, os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJPY=X","GBPJPY=X","EURGBP=X","EURCHF=X","AUDJPY=X","GBPCHF=X","EURAUD=X","GBPAUD=X","EURNZD=X","GBPNZD=X","NZDUSD=X","NZDCAD=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJPY=X","GBPJPY=X","EURGBP=X","EURCHF=X","AUDJPY=X","GBPCHF=X","EURAUD=X","GBPAUD=X","EURNZD=X","GBPNZD=X","NZDUSD=X","NZDCAD=X","GBPAUD=X"]
 
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
     return df
 
+def rsi_calc(series, period=14):
+    delta = series.diff()
+    gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+    loss = -delta.where(delta < 0, 0).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
 def check_pair(sym):
     try:
-        df_h = yf.download(sym, period="20d", interval="60m", progress=False)
-        df_h = fix_df(df_h)
-        if len(df_h) < 60: return None
-        df_4h = df_h.resample('4h').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna()
-        if len(df_4h) < 12: return None
-        last_12 = df_4h.iloc[-12:]; rh=float(last_12['High'].max()); rl=float(last_12['Low'].min()); rs=rh-rl
-        if rs==0: return None
-        df_5 = yf.download(sym, period="5d", interval="5m", progress=False)
-        df_5 = fix_df(df_5)
-        if len(df_5)<20: return None
-        last=df_5.iloc[-1]; o=float(last['Open']); h=float(last['High']); l=float(last['Low']); c=float(last['Close']); body=abs(c-o)
-        up=h-max(o,c); down=min(o,c)-l
-        # LARGO POCO: 2.0x invece di 2.5x, body 0.50 invece di 0.45
-        if body==0 or max(up,down) < body*2.0 or body > (h-l)*0.50: return None
-        # LARGO POCO: 0.18 invece di 0.12
-        if abs(c-rl)/rs < 0.18 and l <= rl*1.0005 and c > rl and down > up*0.8:
-            return {"pair":sym.replace("=X",""),"dir":"BUY","price":f"{c:.5f}","note":f"Rimbalzo Low 4H {down/body:.1f}x"}
-        if abs(c-rh)/rs < 0.18 and h >= rh*0.9995 and c < rh and up > down*0.8:
-            return {"pair":sym.replace("=X",""),"dir":"SELL","price":f"{c:.5f}","note":f"Rifiuto High 4H {up/body:.1f}x"}
-    except: return None
+        df = yf.download(sym, period="2d", interval="5m", progress=False)
+        df = fix_df(df)
+        if len(df) < 60: return None
+        df['RSI'] = rsi_calc(df['Close'], 14)
+
+        highs = df['High'].values
+        lows = df['Low'].values
+
+        swing_high = None
+        swing_low = None
+        for i in range(len(df)-20, len(df)-5):
+            if highs[i] == max(highs[i-5:i+6]):
+                swing_high = float(highs[i])
+            if lows[i] == min(lows[i-5:i+6]):
+                swing_low = float(lows[i])
+
+        if swing_high is None or swing_low is None: return None
+
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        c = float(last['Close'])
+        c_prev = float(prev['Close'])
+        rsi_now = float(last['RSI'])
+        range_sw = swing_high - swing_low
+        if range_sw == 0: return None
+
+        dist_high = abs(c - swing_high) / range_sw
+        dist_low = abs(c - swing_low) / range_sw
+
+        # FILTRO COME DA TUA FOTO - LARGO UN PELO 35/65
+        if dist_low < 0.12 and c > c_prev and rsi_now < 35:
+            return {"pair":sym.replace("=X",""),"dir":"BUY","price":f"{c:.5f}","note":f"CROCE BASSA + RSI {rsi_now:.0f} (ipervenduto)"}
+        if dist_high < 0.12 and c < c_prev and rsi_now > 65:
+            return {"pair":sym.replace("=X",""),"dir":"SELL","price":f"{c:.5f}","note":f"CROCE ALTA + RSI {rsi_now:.0f} (ipercomprato)"}
+    except:
+        return None
 
 @app.route('/')
 def home():
-    return """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V68 LARGO</title>
-<style>body{background:#0a0a0a;color:#fff;font-family:Arial;text-align:center;padding:20px}
-.btn{background:#00ff88;color:#000;border:none;padding:18px;border-radius:14px;font-weight:bold;font-size:20px;width:90%;max-width:360px;display:block;margin:12px auto}
-.card{background:#1a1a1a;border-radius:14px;padding:16px;margin:12px auto;max-width:380px;text-align:left;border-left:5px solid #00ff88;position:relative}
-.exp{background:#00ff88;color:#000;font-weight:bold;padding:6px 10px;border-radius:8px;display:inline-block;margin-top:8px;font-size:16px}
-.sell{border-left-color:#ff3b3b} .old{opacity:0.6;background:#222;border-left-color:#666}
+    return """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V72 RSI</title>
+<style>body{background:#0a0a0a;color:#fff;font-family:Arial;text-align:center;padding:16px}
+.btn{background:#00ff88;color:#000;border:none;padding:16px;border-radius:14px;font-weight:bold;font-size:19px;width:95%;max-width:380px;display:block;margin:10px auto}
+.card{background:#1a1a1a;border-radius:14px;padding:14px;margin:10px auto;max-width:400px;text-align:left;border-left:5px solid #00ff88;position:relative}
+.sell{border-left-color:#ff3b3b}.old{opacity:0.6;background:#222}
 .badge{position:absolute;top:10px;right:10px;font-size:11px;padding:3px 8px;border-radius:6px;font-weight:bold}
-.live{background:#ffcc00;color:#000} .scad{background:#555;color:#fff}
+.live{background:#ffcc00;color:#000}.scad{background:#555;color:#fff}
+.exp{background:#00ff88;color:#000;font-weight:bold;padding:5px 9px;border-radius:8px;display:inline-block;margin-top:6px}
 </style></head><body>
-<h1>🔔 V68 LARGO POCO + 10 MIN</h1>
-<button class="btn" id="b1" onclick="attiva()">🔔 ATTIVA ALLARME FORTE</button>
+<h2>✖️ V72 CROCI + RSI 14</h2>
+<p style="color:#00ff88">Come da tua foto GBP/AUD - RSI sotto</p>
+<button class="btn" id="b1" onclick="attiva()">🔔 ATTIVA ALLARME RSI</button>
 <button class="btn" style="background:#222;color:#fff;border:1px solid #444" onclick="cerca()">🔍 SCAN ORA</button>
-<p id="info">Attiva e lascia aperto...</p><div id="live"></div>
-<hr style="border:0;border-top:1px solid #333;margin:20px 0">
-<h3 style="color:#888">📜 STORICO</h3><div id="hist"></div>
+<p id="info">...</p><div id="live"></div>
+<hr style="border:0;border-top:1px solid #333;margin:18px 0">
+<h3 style="color:#888">📜 STORICO CROCI RSI</h3><div id="hist"></div>
 <button class="btn" style="background:#333;color:#999;font-size:14px;padding:10px" onclick="localStorage.clear();history=[];renderHist();">🗑️ Pulisci storico</button>
 <audio id="s1" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
 <audio id="s2" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
 <script>
-let ok=false; let a1=document.getElementById('s1'), a2=document.getElementById('s2');
-let history = JSON.parse(localStorage.getItem('v68hist')||'[]');
-function attiva(){
- ok=true; a1.play().then(()=>{a1.pause();a1.currentTime=0}).catch(()=>{}); a2.play().then(()=>{a2.pause();a2.currentTime=0}).catch(()=>{});
- document.getElementById('b1').innerHTML='✅ ALLARME ATTIVO - LASCIA APERTO'; document.getElementById('b1').style.background='#ffcc00';
- if(Notification && Notification.permission!='granted'){Notification.requestPermission();}
- renderHist();
-}
-function suona(){if(!ok)return; a1.currentTime=0;a1.play(); setTimeout(()=>{a2.currentTime=0;a2.play()},400); setTimeout(()=>{a1.currentTime=0;a1.play()},900); if(navigator.vibrate) navigator.vibrate([1000,300,1000,300,1000]); if(Notification&&Notification.permission=='granted'){new Notification('🔔 SEGNALE V68!',{body:'Entra 10 MIN'});}}
-function renderHist(){
- let h=''; [...history].reverse().forEach(s=>{
-   h+=`<div class="card old ${s.dir=='SELL'?'sell':''}"><span class="badge scad">SCADUTO - ${s.time}</span><b style="color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>Prezzo: ${s.price}</div>`;
- });
- document.getElementById('hist').innerHTML = h || '<p style="color:#555">Nessun segnale ancora</p>';
-}
-function cerca(){fetch('/api/scan').then(r=>r.json()).then(d=>{
- document.getElementById('info').innerText=d.time+' | Trovati: '+d.signals.length+' | Storico: '+history.length;
- let h=''; let nuovi=0;
- d.signals.forEach(s=>{
-   let id=s.pair+'_'+d.time.slice(0,5);
-   if(!history.find(x=>x.id==id)){history.push({id:id,pair:s.pair,dir:s.dir,price:s.price,note:s.note,time:d.time}); nuovi++;}
-   let cls=s.dir=='SELL'?'card sell':'card';
-   h+=`<div class="${cls}"><span class="badge live">LIVE ORA!</span><b style="font-size:20px;color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>Prezzo: ${s.price}<br><span class="exp">⏱️ SCADENZA: 10 MINUTI</span></div>`;
- });
- if(nuovi>0){localStorage.setItem('v68hist',JSON.stringify(history.slice(-30))); suona(); renderHist();}
- document.getElementById('live').innerHTML=h;
-});}
+let ok=false, a1=document.getElementById('s1'), a2=document.getElementById('s2');
+let history = JSON.parse(localStorage.getItem('v72hist')||'[]');
+function attiva(){ok=true; a1.play().then(()=>{a1.pause();a1.currentTime=0}).catch(()=>{}); a2.play().then(()=>{a2.pause();a2.currentTime=0}).catch(()=>{}); document.getElementById('b1').innerHTML='✅ ALLARME RSI ATTIVO'; document.getElementById('b1').style.background='#ffcc00'; if(Notification&&Notification.permission!='granted')Notification.requestPermission(); renderHist();}
+function suona(){if(!ok)return; a1.currentTime=0;a1.play(); setTimeout(()=>{a2.currentTime=0;a2.play()},400); setTimeout(()=>{a1.currentTime=0;a1.play()},900); if(navigator.vibrate) navigator.vibrate([1000,300,1000,300,1000]); if(Notification&&Notification.permission=='granted')new Notification('✖️ CROCE + RSI!',{body:'RSI 30/70 confermato - Entra 10 MIN'});}
+function renderHist(){let h=''; [...history].reverse().forEach(s=>{h+=`<div class="card old ${s.dir=='SELL'?'sell':''}"><span class="badge scad">SCADUTO - ${s.time}</span><b style="color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>Prezzo: ${s.price}</div>`;}); document.getElementById('hist').innerHTML=h||'<p style="color:#555">Nessuna croce RSI ancora</p>';}
+function cerca(){fetch('/api/scan').then(r=>r.json()).then(d=>{document.getElementById('info').innerText=d.time+' | Segnali RSI: '+d.signals.length; let h=''; let nuovi=0; d.signals.forEach(s=>{let id=s.pair+'_'+d.time.slice(0,5); if(!history.find(x=>x.id==id)){history.push({id:id,pair:s.pair,dir:s.dir,price:s.price,note:s.note,time:d.time}); nuovi++;} let cls=s.dir=='SELL'?'card sell':'card'; h+=`<div class="${cls}"><span class="badge live">RSI LIVE!</span><b style="font-size:20px;color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>Prezzo: ${s.price}<br><span class="exp">⏱️ ENTRA 5 MIN - COME FOTO</span></div>`;}); if(nuovi>0){localStorage.setItem('v72hist',JSON.stringify(history.slice(-40))); suona(); renderHist();} document.getElementById('live').innerHTML=h;});}
 setInterval(cerca,60000); window.onload=()=>{renderHist(); cerca();}
 </script></body></html>"""
 
@@ -90,7 +93,7 @@ setInterval(cerca,60000); window.onload=()=>{renderHist(); cerca();}
 def api():
     tz=pytz.timezone('Europe/Rome'); now=datetime.now(tz).strftime('%H:%M:%S IT')
     out=[]
-    with ThreadPoolExecutor(max_workers=18) as ex:
+    with ThreadPoolExecutor(max_workers=19) as ex:
         futs={ex.submit(check_pair,s):s for s in PAIRS}
         for f in as_completed(futs):
             r=f.result()
