@@ -41,10 +41,10 @@ def stochastic(df,k=14,d=3):
 def scan():
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=2: break # MAX 2 segnali per giro, non 6
+        if count_this_scan>=5: break # MAX 5 segnali per giro, non 6
         clean=symbol.replace("=X","")
-        # COOLDOWN 90 minuti per coppia
-        if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
+        # COOLDOWN 10 minuti per coppia
+        if clean in cooldown and time.time()-cooldown[clean] < 600: continue
         try:
             df=yf.download(symbol, period="5d", interval="15m", progress=False)
             df=fix_df(df)
