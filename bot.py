@@ -59,10 +59,10 @@ def scan():
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
             # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
-            if last['atr'] < last['atr_ma50']*0.70: continue
-            if last['atr'] > last['atr_ma50']*1.8: continue
+            if last['atr'] < last['atr_ma50']*0.66: continue
+            if last['atr'] > last['atr_ma50']*2.0: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.003 # più stretto 0.3% non 0.4%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.004 # più stretto 0.3% non 0.4%
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue # no flat
 
