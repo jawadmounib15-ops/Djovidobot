@@ -6,7 +6,7 @@ import pytz, os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = Flask(__name__)
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJPY=X","GBPJPY=X","EURGBP=X","EURCHF=X","AUDJPY=X","GBPCHF=X","EURAUD=X","GBPAUD=X","EURNZD=X","GBPNZD=X","NZDUSD=X","NZDCAD=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJPY=X","GBPJPY=X","EURGBP=X","EURCHF=X","AUDJPY=X","GBPCHF=X","EURAUD=X","GBPAUD=X","EURNZD=X","GBPNZD=X","NZDCAD=X"]
 
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
