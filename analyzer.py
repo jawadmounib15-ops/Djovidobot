@@ -56,7 +56,7 @@ def check_pair(sym):
         min_20 = float(last_20['Low'].min())
         range_20_pct = (max_20 - min_20) / c
 
-        if range_20_pct < 0.0018: # range troppo piccolo = laterale
+        if range_20_pct < 0.0010: # range troppo piccolo = laterale
             return None
 
         # Conta candele piccole (zona morta)
@@ -69,7 +69,7 @@ def check_pair(sym):
                 if body < (range_sw * 0.12):
                     small += 1
             except: pass
-        if small >= 8: # 8 su 12 piccole = laterale come foto tua
+        if small >= 6: # 6 su 12 piccole = laterale come foto tua
             return None
 
         # RSI piatto = laterale
@@ -81,9 +81,9 @@ def check_pair(sym):
         dist_high = abs(c - swing_high) / range_sw
         dist_low = abs(c - swing_low) / range_sw
 
-        if dist_low < 0.12 and c > c_prev and rsi_now < 36:
+        if dist_low < 0.12 and c > c_prev and rsi_now < 40:
             return {"pair":sym.replace("=X",""),"dir":"BUY","price":f"{c:.5f}","note":f"CROCE BASSA + RSI {rsi_now:.0f}"}
-        if dist_high < 0.12 and c < c_prev and rsi_now > 64:
+        if dist_high < 0.12 and c < c_prev and rsi_now > 60:
             return {"pair":sym.replace("=X",""),"dir":"SELL","price":f"{c:.5f}","note":f"CROCE ALTA + RSI {rsi_now:.0f}"}
 
     except:
