@@ -64,9 +64,9 @@ def check_otc(pair_otc, real_sym):
             r=f(df)
             if r: voti.append(r)
         # OTC largo - basta 1
-        if voti.count("BUY")>=1 and voti.count("BUY")>=voti.count("SELL"):
+        if voti.count("BUY")>=2 and voti.count("BUY")>=voti.count("SELL"):
             c=float(df.iloc[-1]['Close']); return {"pair":pair_otc,"dir":"BUY","price":f"{c:.5f}","note":f"OTC BUY RSI {float(df.iloc[-1]['RSI']):.0f}"}
-        if voti.count("SELL")>=1 and voti.count("SELL")>=voti.count("BUY"):
+        if voti.count("SELL")>=2 and voti.count("SELL")>=voti.count("BUY"):
             c=float(df.iloc[-1]['Close']); return {"pair":pair_otc,"dir":"SELL","price":f"{c:.5f}","note":f"OTC SELL RSI {float(df.iloc[-1]['RSI']):.0f}"}
     except: return None
 
