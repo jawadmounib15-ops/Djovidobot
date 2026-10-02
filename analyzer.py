@@ -1,7 +1,7 @@
-# V84.1 47 FINALE 1 MIN - CON 50 SECONDI PER ENTRARE - PIU' VINCENTE
+# V84.2 FIX BOTTONE - 1 MIN CON TEMPO
 import yfinance as yf, pandas as pd
 from flask import Flask, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz, os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -28,49 +28,38 @@ OTC_MAP = {
 def fix(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
     return df
-
 def add_all(df):
     d=df['Close'].diff()
     df['RSI']=100-(100/(1+d.where(d>0,0).rolling(14).mean()/-d.where(d<0,0).rolling(14).mean()))
-    df['EMA21']=df['Close'].ewm(21).mean()
-    df['EMA50']=df['Close'].ewm(50).mean()
+    df['EMA21']=df['Close'].ewm(21).mean(); df['EMA50']=df['Close'].ewm(50).mean()
     df['BB_UP']=df['Close'].rolling(20).mean() + df['Close'].rolling(20).std()*2
     df['BB_LOW']=df['Close'].rolling(20).mean() - df['Close'].rolling(20).std()*2
     df['ATR']=(df['High']-df['Low']).rolling(14).mean()
     return df
-
 def lavoro1_trend(df):
-    c=float(df.iloc[-1]['Close']); c1=float(df.iloc[-2]['Close'])
-    ema21=float(df.iloc[-1]['EMA21']); ema50=float(df.iloc[-1]['EMA50']); rsi=float(df.iloc[-1]['RSI'])
+    c=float(df.iloc[-1]['Close']); c1=float(df.iloc[-2]['Close']); ema21=float(df.iloc[-1]['EMA21']); ema50=float(df.iloc[-1]['EMA50']); rsi=float(df.iloc[-1]['RSI'])
     if c>ema50 and ema21>ema50 and 38<=rsi<=55 and c>=c1 and abs(c-ema21)/c<0.0008: return "BUY"
     if c<ema50 and ema21<ema50 and 45<=rsi<=62 and c<=c1 and abs(c-ema21)/c<0.0008: return "SELL"
     return None
-
 def lavoro2_boll(df):
     c=float(df.iloc[-1]['Close']); rsi=float(df.iloc[-1]['RSI'])
     if float(df.iloc[-2]['Low']) < float(df.iloc[-2]['BB_LOW']) and c>float(df.iloc[-1]['BB_LOW']) and 35<=rsi<=50: return "BUY"
     if float(df.iloc[-2]['High']) > float(df.iloc[-2]['BB_UP']) and c<float(df.iloc[-1]['BB_UP']) and 50<=rsi<=65: return "SELL"
     return None
-
 def lavoro3_engulf(df):
-    o=float(df.iloc[-1]['Open']); c=float(df.iloc[-1]['Close']); o1=float(df.iloc[-2]['Open']); c1=float(df.iloc[-2]['Close'])
-    body=abs(c-o); body1=abs(c1-o1); atr=float(df.iloc[-1]['ATR'])
+    o=float(df.iloc[-1]['Open']); c=float(df.iloc[-1]['Close']); o1=float(df.iloc[-2]['Open']); c1=float(df.iloc[-2]['Close']); body=abs(c-o); body1=abs(c1-o1); atr=float(df.iloc[-1]['ATR'])
     if body > body1*1.8 and atr/c>0.00015:
         if c>o and c1<o1: return "BUY"
         if c<o and c1>o1: return "SELL"
     return None
-
 def lavoro4_doppio(df):
-    c=float(df.iloc[-1]['Close']); rsi=float(df.iloc[-1]['RSI'])
-    low20=float(df.iloc[-20:]['Low'].min()); high20=float(df.iloc[-20:]['High'].max())
+    c=float(df.iloc[-1]['Close']); rsi=float(df.iloc[-1]['RSI']); low20=float(df.iloc[-20:]['Low'].min()); high20=float(df.iloc[-20:]['High'].max())
     if c > low20*1.0005 and float(df.iloc[-10:]['Low'].min())==low20 and 38<=rsi<=52: return "BUY"
     if c < high20*0.9995 and float(df.iloc[-10:]['High'].max())==high20 and 48<=rsi<=62: return "SELL"
     return None
-
 def filtro_ultra(df, direzione):
     try:
-        o=float(df.iloc[-1]['Open']); c=float(df.iloc[-1]['Close']); h=float(df.iloc[-1]['High']); l=float(df.iloc[-1]['Low'])
-        body=abs(c-o)
+        o=float(df.iloc[-1]['Open']); c=float(df.iloc[-1]['Close']); h=float(df.iloc[-1]['High']); l=float(df.iloc[-1]['Low']); body=abs(c-o)
         if body==0: return False
         upper_wick = h - max(o,c); lower_wick = min(o,c) - l
         if direzione=="BUY" and upper_wick > body*1.2: return False
@@ -79,14 +68,11 @@ def filtro_ultra(df, direzione):
         if body/c < 0.00005: return False
         return True
     except: return False
-
 def check_otc(pair_otc, real_sym):
     try:
-        df=yf.download(real_sym, period="5d", interval="1m", progress=False)
-        df=fix(df)
+        df=yf.download(real_sym, period="5d", interval="1m", progress=False); df=fix(df)
         if len(df)<60: return None
-        df=add_all(df)
-        voti={"BUY":[],"SELL":[]}
+        df=add_all(df); voti={"BUY":[],"SELL":[]}
         for nome, func in [("TREND",lavoro1_trend),("BOLL",lavoro2_boll),("ENGULF",lavoro3_engulf),("DOPPIO",lavoro4_doppio)]:
             r=func(df)
             if r: voti[r].append(nome)
@@ -102,44 +88,89 @@ def check_otc(pair_otc, real_sym):
 
 @app.route('/')
 def home():
-    return """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V84.1 1MIN PREPARA</title>
+    return """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V84.2 FIX</title>
 <style>
 body{background:#0a0a0a;color:#fff;font-family:Arial;text-align:center;padding:16px}
-.btn{background:#00ff88;color:#000;border:none;padding:16px;border-radius:14px;font-weight:bold;font-size:18px;width:95%;max-width:400px;display:block;margin:10px auto}
+.btn{padding:20px;border-radius:16px;font-weight:bold;font-size:20px;width:95%;max-width:400px;display:block;margin:12px auto;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}
+.btn-green{background:#00ff88;color:#000;border:3px solid #00ff88}
+.btn-dark{background:#222;color:#fff;border:2px solid #444}
 .card{background:#1a1a1a;border-radius:14px;padding:14px;margin:10px auto;max-width:420px;text-align:left;border-left:6px solid #00ff88;position:relative}
 .sell{border-left-color:#ff3b3b}.old{opacity:0.5}
 .badge{position:absolute;top:10px;right:10px;font-size:11px;font-weight:bold;padding:4px 8px;border-radius:6px}
-.live{background:#00ff88;color:#000;animation:blink 1s infinite}.scaduto{background:#ff3b3b;color:#fff}.warn{background:#ffcc00;color:#000}
-@keyframes blink{50%{opacity:0.5}}
+.live{background:#00ff88;color:#000}.scaduto{background:#ff3b3b;color:#fff}.warn{background:#ffcc00;color:#000}
 .countdown{font-weight:bold;font-size:13px;padding:8px 10px;border-radius:8px;display:inline-block;margin-top:8px;width:92%;text-align:center}
 .c-ok{background:#00ff88;color:#000}.c-warn{background:#ffcc00;color:#000}.c-exp{background:#ff3b3b;color:#fff}
 .prepara{background:#ffcc00;color:#000;font-weight:bold;padding:10px;border-radius:10px;margin-top:8px;text-align:center;font-size:15px;border:2px solid #fff}
 .exp{background:#00ff88;color:#000;font-weight:bold;padding:8px 10px;border-radius:8px;display:inline-block;margin-top:6px;width:90%;text-align:center;font-size:14px}
-.hist-card{background:#111;border-radius:10px;padding:10px;margin:6px auto;max-width:420px;text-align:left;border-left:3px solid #555;font-size:12px}
 </style></head><body>
-<h2>✅ V84.1 - 1 MIN CON TEMPO</h2>
-<p style="color:#00ff88">TI AVVISA 50 SEC PRIMA - ENTRA A INIZIO CANDELA</p>
-<button class="btn" id="b1" onclick="attiva()">🔔 ATTIVA V84.1</button>
-<button class="btn" style="background:#222;color:#fff;border:1px solid #444" onclick="cerca()">🔍 SCAN 47 - 1 MIN</button>
-<p id="info">...</p>
+<h2>✅ V84.2 - FIX BOTTONE</h2>
+<p style="color:#00ff88">CLICCA QUI SOTTO - ORA SBLOCCATO</p>
+
+<div class="btn btn-green" id="b1" onclick="attiva()" ontouchstart="attiva()">🔔 CLICCA QUI PER ATTIVARE SUONO</div>
+<div class="btn btn-dark" id="b2" onclick="cerca()" ontouchstart="cerca()">🔍 SCAN 47 - 1 MIN</div>
+
+<p id="info">Pronto - clicca ATTIVA</p>
 <h3 style="color:#00ff88">🔥 LIVE 47 - 1 MIN</h3><div id="live"></div>
-<hr style="border-top:1px solid #333;margin:18px 0">
 <h3 style="color:#888">📜 STORICO</h3><div id="hist"></div>
-<button class="btn" style="background:#333;color:#999;font-size:14px" onclick="if(confirm('Pulisci?')){localStorage.clear();history=[];liveSignals={};renderHist();}">🗑️ Pulisci</button>
-<audio id="s1" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
-<audio id="s2" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg"></audio>
+
 <script>
-let ok=false,a1=document.getElementById('s1'),a2=document.getElementById('s2');
-let history=JSON.parse(localStorage.getItem('otc_84_1_prepara')||'[]');
+let ok=false;
+let history=JSON.parse(localStorage.getItem('otc_84_2')||'[]');
 let liveSignals={}; const VALIDITA=2;
-function attiva(){ok=true;a1.play().then(()=>{a1.pause();a1.currentTime=0}).catch(()=>{});a2.play().then(()=>{a2.pause();a2.currentTime=0}).catch(()=>{});document.getElementById('b1').innerHTML='✅ V84.1 ATTIVO - 1 MIN';document.getElementById('b1').style.background='#00ff88';if(Notification&&Notification.permission!='granted')Notification.requestPermission();renderHist();}
-function suona(){if(!ok)return;a1.currentTime=0;a1.play();setTimeout(()=>{a2.currentTime=0;a2.play()},400);if(navigator.vibrate)navigator.vibrate([800,200,800]);}
+function attiva(){
+  ok=true;
+  document.getElementById('b1').innerHTML='✅ SUONO ATTIVO - V84.2';
+  document.getElementById('b1').style.background='#00ff88';
+  let a=new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+  a.play().catch(e=>{console.log(e)});
+  if(Notification&&Notification.permission!='granted') Notification.requestPermission();
+  document.getElementById('info').innerText='✅ ATTIVO! Suono sbloccato - ora fa BEEP ai segnali';
+  try{navigator.vibrate(300);}catch(e){}
+  renderHist(); cerca();
+}
+function suona(){
+  if(!ok) return;
+  let a1=new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');
+  let a2=new Audio('https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg');
+  a1.play(); setTimeout(()=>a2.play(),400);
+  try{navigator.vibrate([800,200,800]);}catch(e){}
+  if(Notification&&Notification.permission=='granted'){new Notification('🔥 SEGNALE 1 MIN!',{body:'Nuovo segnale 85% - entra a inizio candela!'});}
+}
 function formatTime(ts){return new Date(ts).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 function getNextCandleTime(){let now=new Date(); let next=new Date(now); next.setSeconds(0,0); next.setMinutes(now.getMinutes()+1); return next;}
-function renderHist(){let h='';[...history].reverse().slice(0,80).forEach(s=>{let exp=new Date(s.ts+VALIDITA*60000).toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'}); h+=`<div class="hist-card" style="border-left-color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}"><b style="color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b> - ${s.price}<br><span style="color:#aaa">Nato: ${s.time} | Scad: ${exp}</span><br><span style="color:#888">${s.note}</span></div>`;});document.getElementById('hist').innerHTML=h||'<p style="color:#555">Vuoto</p>';}
-function aggiornaCountdown(){let now=Date.now(); document.querySelectorAll('.countdown').forEach(el=>{let scad=parseInt(el.dataset.scad); let diff=scad-now; if(diff<=0){el.textContent='⛔ SCADUTO - NON ENTRARE'; el.className='countdown c-exp';}else{let sec=Math.floor(diff/1000); let m=Math.floor(sec/60); let s=sec%60; el.textContent=`⏳ VALIDITA: ${m}:${s.toString().padStart(2,'0')} | Nato: ${el.dataset.nato} | Scad: ${el.dataset.exp}`; el.className=m>=1?'countdown c-ok':'countdown c-warn';}}); document.querySelectorAll('.prepara').forEach(el=>{let entry=parseInt(el.dataset.entry); let diff=entry-Date.now(); if(diff<=0){el.innerHTML='🔥 ENTRA ORA! INIZIO CANDELA! TRADE 1 MINUTO!'; el.style.background='#00ff88';}else{let sec=Math.ceil(diff/1000); el.innerHTML=`⏰ PREPARATI - ENTRA TRA ${sec} SECONDI ALLE ${el.dataset.entrytime} PRECISE - HAI TEMPO!`;}}});}
-function cerca(){fetch('/api/scan').then(r=>r.json()).then(d=>{document.getElementById('info').innerText=d.time+' | 47 OTC | 1 MIN | Hai 50 sec per entrare a inizio candela'; let h=''; let now=Date.now(); let nextCandle=getNextCandleTime(); let entryTime=nextCandle.getTime(); let entryStr=nextCandle.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); let nuovi=0; d.signals.forEach(s=>{let id=s.pair+'_'+s.dir; let isNew=!liveSignals[id]; let ts=isNew?now:liveSignals[id].ts; let scadenza_ts=ts+VALIDITA*60000; if(isNew){liveSignals[id]={ts:now,scadenza_ts:scadenza_ts,entry:entryTime}; history.push({pair:s.pair,dir:s.dir,price:s.price,note:s.note,time:d.time,ts:now}); if(history.length>100) history=history.slice(-100); localStorage.setItem('otc_84_1_prepara',JSON.stringify(history)); nuovi++;} let ageMin=Math.floor((now-ts)/60000); let expired=now>scadenza_ts; let badgeClass=expired?'scaduto':(ageMin<=1?'live':'warn'); let badgeTxt=expired?'🔴 SCADUTO':(ageMin<=1?'🟢 NUOVO':'🟡 '+ageMin+'m'); let entryData=isNew?entryTime:liveSignals[id].entry; h+=`<div class="card ${s.dir=='SELL'?'sell':''} ${expired?'old':''}"><span class="badge ${badgeClass}">${badgeTxt}</span><b style="font-size:16px;color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>${s.price}<br><div class="prepara" data-entry="${entryData}" data-entrytime="${entryStr}">⏰ PREPARATI - ENTRA ALLE ${entryStr} PRECISE</div><div class="countdown" data-scad="${scadenza_ts}" data-nato="${formatTime(ts)}" data-exp="${formatTime(scadenza_ts)}">⏳...</div><br><span class="exp">⏱️ TRADE 00:01:00 - ENTRA A INIZIO CANDELA</span></div>`;}); if(nuovi>0){suona(); renderHist();} document.getElementById('live').innerHTML=h||'<p style="color:#666">Nessun segnale 85% - ULTRA 1MIN sta filtrando - meglio 0 che LOSS</p>';});}
-setInterval(cerca,20000); setInterval(aggiornaCountdown,1000); window.onload=()=>{renderHist(); cerca();};
+function renderHist(){let h='';[...history].reverse().slice(0,40).forEach(s=>{ h+=`<div style="background:#111;padding:8px;margin:5px;border-left:3px solid ${s.dir=='BUY'?'#00ff88':'#ff3b3b'};font-size:12px">${s.dir} ${s.pair} - ${s.time}</div>`;}); document.getElementById('hist').innerHTML=h;}
+function aggiornaCountdown(){
+  let now=Date.now();
+  document.querySelectorAll('.countdown').forEach(el=>{
+    let scad=parseInt(el.dataset.scad); let diff=scad-now;
+    if(diff<=0){el.textContent='⛔ SCADUTO'; el.className='countdown c-exp';}
+    else{let sec=Math.floor(diff/1000); let m=Math.floor(sec/60); let s=sec%60; el.textContent=`⏳ ${m}:${s.toString().padStart(2,'0')} | ${el.dataset.nato} -> ${el.dataset.exp}`; el.className=m>=1?'countdown c-ok':'countdown c-warn';}
+  });
+  document.querySelectorAll('.prepara').forEach(el=>{
+    let entry=parseInt(el.dataset.entry); let diff=entry-Date.now();
+    if(diff<=0){el.innerHTML='🔥 ENTRA ORA! INIZIO CANDELA!'; el.style.background='#00ff88';}
+    else{let sec=Math.ceil(diff/1000); el.innerHTML=`⏰ ENTRA TRA ${sec} SEC ALLE ${el.dataset.entrytime}`;}
+  });
+}
+function cerca(){
+  document.getElementById('info').innerText='⏳ Scansione 47 in corso...';
+  fetch('/api/scan').then(r=>r.json()).then(d=>{
+    document.getElementById('info').innerText=d.time+' | 47 OTC | 1 MIN SICURO';
+    let h=''; let now=Date.now(); let nextCandle=getNextCandleTime(); let entryTime=nextCandle.getTime(); let entryStr=nextCandle.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});
+    let nuovi=0;
+    d.signals.forEach(s=>{
+      let id=s.pair+'_'+s.dir; let isNew=!liveSignals[id]; let ts=isNew?now:liveSignals[id].ts; let scadenza_ts=ts+VALIDITA*60000;
+      if(isNew){liveSignals[id]={ts:now,scadenza_ts:scadenza_ts,entry:entryTime}; history.push({pair:s.pair,dir:s.dir,time:d.time,ts:now}); if(history.length>100) history=history.slice(-100); localStorage.setItem('otc_84_2',JSON.stringify(history)); nuovi++;}
+      let expired=now>scadenza_ts; let badge=expired?'🔴 SCADUTO':'🟢 NUOVO';
+      let entryData=isNew?entryTime:liveSignals[id].entry;
+      h+=`<div class="card ${s.dir=='SELL'?'sell':''}"><b style="color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b> - ${badge}<br>${s.note}<br>${s.price}<br><div class="prepara" data-entry="${entryData}" data-entrytime="${entryStr}">⏰ ENTRA ALLE ${entryStr}</div><div class="countdown" data-scad="${scadenza_ts}" data-nato="${formatTime(ts)}" data-exp="${formatTime(scadenza_ts)}">⏳...</div><br><span class="exp">TRADE 1 MINUTO</span></div>`;
+    });
+    if(nuovi>0){suona(); renderHist();}
+    document.getElementById('live').innerHTML=h||'<p style="color:#666">Nessun segnale 85% - filtro ultra stretto</p>';
+  }).catch(e=>{document.getElementById('info').innerText='Errore, riprova';});
+}
+setInterval(cerca,20000); setInterval(aggiornaCountdown,1000);
+window.onload=()=>{renderHist();};
 </script></body></html>"""
 
 @app.route('/api/scan')
