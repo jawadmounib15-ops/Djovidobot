@@ -60,15 +60,15 @@ def scan():
 
             # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
             if last['atr'] < last['atr_ma50']*0.70: continue
-            if last['atr'] > last['atr_ma50']*2.0: continue
+            if last['atr'] > last['atr_ma50']*1.8: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.004# più stretto 0.3% non 0.2%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.002# più stretto 0.2% non 0.1%
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue # no flat
 
             signal=None
             # STRETT0: RSI più centrale e stoch più estremo
-            if price>float(last['e200']) and tocco_e20 and 60<=rsi_v<=72 and stoch_k<85:
+            if price>float(last['e200']) and tocco_e20 and 65<=rsi_v<=72 and stoch_k<85:
                 signal="BUY"
             if price<float(last['e200']) and tocco_e20 and 20<=rsi_v<=30 and stoch_k>15:
                 signal="SELL"
@@ -80,21 +80,6 @@ def scan():
                 cooldown[clean]=time.time()
                 count_this_scan+=1
         except: continue
-
-def check_results():
-    now=time.time()
-    for p in pending[:]:
-        if now-p['time'] < 60: continue # controlla dopo 2min 
-        try:
-            df=yf.download(p['symbol']+"=X", period="1d", interval="1m", progress=False)
-            df=fix_df(df)
-            if len(df)==0: continue
-            curr=float(df['Close'].iloc[-1])
-            win=(p['signal']=="BUY" and curr>p['entry']) or (p['signal']=="SELL" and curr<p['entry'])
-            # manda solo WIN/LOSS importanti, non spam
-            send(f"{'WIN ✅' if win else 'LOSS ❌'} L4 {p['signal']} {p['symbol']} {((curr-p['entry'])/p['entry']*100):+.2f}%")
-            pending.remove(p)
-        except: pass
 
 def loop():
     send(f"🚀 V61.1 STRETT0 - {len(PAIRS)} coppie - max 2 segnali/giro - cooldown 90min")
