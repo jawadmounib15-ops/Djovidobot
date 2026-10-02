@@ -62,15 +62,15 @@ def scan():
             if last['atr'] < last['atr_ma50']*0.70: continue
             if last['atr'] > last['atr_ma50']*2.0: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.003 # più stretto 0.3% non 0.2%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.004# più stretto 0.3% non 0.2%
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue # no flat
 
             signal=None
             # STRETT0: RSI più centrale e stoch più estremo
-            if price>float(last['e200']) and tocco_e20 and 55<=rsi_v<=72 and stoch_k<85:
+            if price>float(last['e200']) and tocco_e20 and 60<=rsi_v<=72 and stoch_k<85:
                 signal="BUY"
-            if price<float(last['e200']) and tocco_e20 and 20<=rsi_v<=40 and stoch_k>15:
+            if price<float(last['e200']) and tocco_e20 and 20<=rsi_v<=30 and stoch_k>15:
                 signal="SELL"
 
             if signal:
