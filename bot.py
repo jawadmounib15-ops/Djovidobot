@@ -41,7 +41,7 @@ def stochastic(df,k=14,d=3):
 def scan():
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=8: break # MAX 4 segnali per giro, non 6
+        if count_this_scan>=4: break # MAX 4 segnali per giro, non 6
         clean=symbol.replace("=X","")
         # COOLDOWN 90 minuti per coppia
         if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
@@ -70,7 +70,7 @@ def scan():
             # STRETT0: RSI più centrale e stoch più estremo
             if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=35 and stoch_k<15:
                 signal="BUY"
-            if price<float(last['e200']) and tocco_e20 and 65<=rsi_v<=75 and stoch_k>85:
+            if price<float(last['e200']) and tocco_e20 and 65<=rsi_v<=70 and stoch_k>85:
                 signal="SELL"
 
             if signal:
