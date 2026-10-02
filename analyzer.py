@@ -1,4 +1,4 @@
-# ANALYZER.PY V73 - CROCI VERE + ANTI LATERALE
+# ANALYZER.PY V73.1 - LARGATO UN PELINO - STESSE REGOLE
 import yfinance as yf, pandas as pd
 from flask import Flask, jsonify
 from datetime import datetime
@@ -25,12 +25,8 @@ def check_pair(sym):
         df = fix_df(df)
         if len(df) < 70: return None
         df['RSI'] = rsi_calc(df['Close'], 14)
-
         highs = df['High'].values
         lows = df['Low'].values
-        closes = df['Close'].values
-
-        # TROVA CROCI
         swing_high = None
         swing_low = None
         for i in range(len(df)-25, len(df)-5):
@@ -38,60 +34,46 @@ def check_pair(sym):
                 swing_high = float(highs[i])
             if lows[i] == min(lows[i-5:i+6]):
                 swing_low = float(lows[i])
-
         if swing_high is None or swing_low is None: return None
-
         last = df.iloc[-1]
         prev = df.iloc[-2]
         c = float(last['Close'])
         c_prev = float(prev['Close'])
-        o_last = float(last['Open'])
         rsi_now = float(last['RSI'])
         range_sw = swing_high - swing_low
         if range_sw == 0: return None
-
-        # --- FILTRO ANTI ZONA MORTA (COME QUELLA CHE HAI CERCHIATO) ---
         last_20 = df.iloc[-20:]
         max_20 = float(last_20['High'].max())
         min_20 = float(last_20['Low'].min())
         range_20_pct = (max_20 - min_20) / c
-
-        if range_20_pct < 0.0010: # range troppo piccolo = laterale
+        if range_20_pct < 0.0008: # LARGATO era 0.0010
             return None
-
-        # Conta candele piccole (zona morta)
         small = 0
         for k in range(-12, 0):
             try:
                 cc = float(df.iloc[k]['Close'])
                 oo = float(df.iloc[k]['Open'])
                 body = abs(cc-oo)
-                if body < (range_sw * 0.12):
+                if body < (range_sw * 0.10): # LARGATO era 0.12
                     small += 1
             except: pass
-        if small >= 6: # 6 su 12 piccole = laterale come foto tua
+        if small >= 8: # LARGATO era 6
             return None
-
-        # RSI piatto = laterale
         rsi_last5 = df['RSI'].iloc[-5:].values
-        if max(rsi_last5) - min(rsi_last5) < 5 and 40 < rsi_now < 60:
+        if max(rsi_last5) - min(rsi_last5) < 3 and 38 < rsi_now < 62: # LARGATO era <5 e 40-60
             return None
-
-        # --- FILTRO CROCE + RSI ---
         dist_high = abs(c - swing_high) / range_sw
         dist_low = abs(c - swing_low) / range_sw
-
-        if dist_low < 0.12 and c > c_prev and rsi_now < 40:
+        if dist_low < 0.18 and c > c_prev and rsi_now < 45: # LARGATO era 0.12 e 40
             return {"pair":sym.replace("=X",""),"dir":"BUY","price":f"{c:.5f}","note":f"CROCE BASSA + RSI {rsi_now:.0f}"}
-        if dist_high < 0.12 and c < c_prev and rsi_now > 60:
+        if dist_high < 0.18 and c < c_prev and rsi_now > 55: # LARGATO era 0.12 e 60
             return {"pair":sym.replace("=X",""),"dir":"SELL","price":f"{c:.5f}","note":f"CROCE ALTA + RSI {rsi_now:.0f}"}
-
     except:
         return None
 
 @app.route('/')
 def home():
-    return """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V73 ANTI-LATERALE</title>
+    return """<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>V73.1 LARGATO</title>
 <style>body{background:#0a0a0a;color:#fff;font-family:Arial;text-align:center;padding:16px}
 .btn{background:#00ff88;color:#000;border:none;padding:16px;border-radius:14px;font-weight:bold;font-size:19px;width:95%;max-width:380px;display:block;margin:10px auto}
 .card{background:#1a1a1a;border-radius:14px;padding:14px;margin:10px auto;max-width:400px;text-align:left;border-left:5px solid #00ff88;position:relative}
@@ -100,23 +82,23 @@ def home():
 .live{background:#ffcc00;color:#000}.scad{background:#555;color:#fff}
 .exp{background:#00ff88;color:#000;font-weight:bold;padding:5px 9px;border-radius:8px;display:inline-block;margin-top:6px}
 </style></head><body>
-<h2>✖️ V73 NO ZONA MORTA</h2>
-<p style="color:#00ff88">Scarta laterale come foto cerchiata</p>
-<button class="btn" id="b1" onclick="attiva()">🔔 ATTIVA ALLARME CROCI VERE</button>
+<h2>✖️ V73.1 LARGATO UN PELINO</h2>
+<p style="color:#00ff88">Stesse regole - 15% più largo</p>
+<button class="btn" id="b1" onclick="attiva()">🔔 ATTIVA ALLARME</button>
 <button class="btn" style="background:#222;color:#fff;border:1px solid #444" onclick="cerca()">🔍 SCAN ORA</button>
 <p id="info">...</p><div id="live"></div>
 <hr style="border:0;border-top:1px solid #333;margin:18px 0">
-<h3 style="color:#888">📜 STORICO CROCI VERE</h3><div id="hist"></div>
-<button class="btn" style="background:#333;color:#999;font-size:14px;padding:10px" onclick="localStorage.clear();history=[];renderHist();">🗑️ Pulisci storico</button>
+<h3 style="color:#888">📜 STORICO</h3><div id="hist"></div>
+<button class="btn" style="background:#333;color:#999;font-size:14px;padding:10px" onclick="localStorage.clear();history=[];renderHist();">🗑️ Pulisci</button>
 <audio id="s1" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
 <audio id="s2" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
 <script>
 let ok=false, a1=document.getElementById('s1'), a2=document.getElementById('s2');
 let history = JSON.parse(localStorage.getItem('v73hist')||'[]');
-function attiva(){ok=true; a1.play().then(()=>{a1.pause();a1.currentTime=0}).catch(()=>{}); a2.play().then(()=>{a2.pause();a2.currentTime=0}).catch(()=>{}); document.getElementById('b1').innerHTML='✅ ANTI-LATERALE ATTIVO'; document.getElementById('b1').style.background='#ffcc00'; if(Notification&&Notification.permission!='granted')Notification.requestPermission(); renderHist();}
-function suona(){if(!ok)return; a1.currentTime=0;a1.play(); setTimeout(()=>{a2.currentTime=0;a2.play()},400); setTimeout(()=>{a1.currentTime=0;a1.play()},900); if(navigator.vibrate) navigator.vibrate([1000,300,1000,300,1000]); if(Notification&&Notification.permission=='granted')new Notification('✖️ CROCE VERA!',{body:'No zona morta - Entra 00:05:00'});}
-function renderHist(){let h=''; [...history].reverse().forEach(s=>{h+=`<div class="card old ${s.dir=='SELL'?'sell':''}"><span class="badge scad">SCADUTO - ${s.time}</span><b style="color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>Prezzo: ${s.price}</div>`;}); document.getElementById('hist').innerHTML=h||'<p style="color:#555">Nessuna croce vera ancora</p>';}
-function cerca(){fetch('/api/scan').then(r=>r.json()).then(d=>{document.getElementById('info').innerText=d.time+' | Croci vere: '+d.signals.length; let h=''; let nuovi=0; d.signals.forEach(s=>{let id=s.pair+'_'+d.time.slice(0,5); if(!history.find(x=>x.id==id)){history.push({id:id,pair:s.pair,dir:s.dir,price:s.price,note:s.note,time:d.time}); nuovi++;} let cls=s.dir=='SELL'?'card sell':'card'; h+=`<div class="${cls}"><span class="badge live">CROCE VERA!</span><b style="font-size:20px;color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>Prezzo: ${s.price}<br><span class="exp">⏱️ ENTRA 00:05:00</span></div>`;}); if(nuovi>0){localStorage.setItem('v73hist',JSON.stringify(history.slice(-40))); suona(); renderHist();} document.getElementById('live').innerHTML=h;});}
+function attiva(){ok=true; a1.play().then(()=>{a1.pause();a1.currentTime=0}).catch(()=>{}); a2.play().then(()=>{a2.pause();a2.currentTime=0}).catch(()=>{}); document.getElementById('b1').innerHTML='✅ ATTIVO LARGATO'; document.getElementById('b1').style.background='#ffcc00'; if(Notification&&Notification.permission!='granted')Notification.requestPermission(); renderHist();}
+function suona(){if(!ok)return; a1.currentTime=0;a1.play(); setTimeout(()=>{a2.currentTime=0;a2.play()},400); setTimeout(()=>{a1.currentTime=0;a1.play()},900); if(navigator.vibrate) navigator.vibrate([1000,300,1000,300,1000]); if(Notification&&Notification.permission=='granted')new Notification('✖️ CROCE VERA!',{body:'Entra 00:05:00'});}
+function renderHist(){let h=''; [...history].reverse().forEach(s=>{h+=`<div class="card old ${s.dir=='SELL'?'sell':''}"><span class="badge scad">SCADUTO - ${s.time}</span><b style="color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>Prezzo: ${s.price}</div>`;}); document.getElementById('hist').innerHTML=h||'<p style="color:#555">Nessuna croce ancora</p>';}
+function cerca(){fetch('/api/scan').then(r=>r.json()).then(d=>{document.getElementById('info').innerText=d.time+' | Croci: '+d.signals.length; let h=''; let nuovi=0; d.signals.forEach(s=>{let id=s.pair+'_'+d.time.slice(0,5); if(!history.find(x=>x.id==id)){history.push({id:id,pair:s.pair,dir:s.dir,price:s.price,note:s.note,time:d.time}); nuovi++;} let cls=s.dir=='SELL'?'card sell':'card'; h+=`<div class="${cls}"><span class="badge live">CROCE!</span><b style="font-size:20px;color:${s.dir=='BUY'?'#00ff88':'#ff3b3b'}">${s.dir} ${s.pair}</b><br>${s.note}<br>Prezzo: ${s.price}<br><span class="exp">⏱️ ENTRA 00:05:00</span></div>`;}); if(nuovi>0){localStorage.setItem('v73hist',JSON.stringify(history.slice(-40))); suona(); renderHist();} document.getElementById('live').innerHTML=h;});}
 setInterval(cerca,60000); window.onload=()=>{renderHist(); cerca();}
 </script></body></html>"""
 
