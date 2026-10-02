@@ -7,7 +7,7 @@ import requests
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
 # TOLTE esotiche USDSEK/MXN/NOK che spammavano
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","AUDCAD=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 
 app = Flask(__name__)
 @app.route('/')
@@ -41,7 +41,7 @@ def stochastic(df,k=14,d=3):
 def scan():
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=4: break # MAX 4 segnali per giro, non 6
+        if count_this_scan>=2: break # MAX 2 segnali per giro, non 6
         clean=symbol.replace("=X","")
         # COOLDOWN 90 minuti per coppia
         if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
@@ -62,15 +62,15 @@ def scan():
             if last['atr'] < last['atr_ma50']*0.70: continue
             if last['atr'] > last['atr_ma50']*1.8: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.003# più stretto 0.3% non 0.2%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.002 # più stretto 0.3% non 0.4%
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue # no flat
 
             signal=None
             # STRETT0: RSI più centrale e stoch più estremo
-            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=40 and stoch_k<15:
+            if price>float(last['e200']) and tocco_e20 and 30<=rsi_v<=36 and stoch_k<15:
                 signal="BUY"
-            if price<float(last['e200']) and tocco_e20 and 60<=rsi_v<=70 and stoch_k>85:
+            if price<float(last['e200']) and tocco_e20 and 64<=rsi_v<=70 and stoch_k>85:
                 signal="SELL"
 
             if signal:
