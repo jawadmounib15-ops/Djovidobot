@@ -62,7 +62,7 @@ setInterval(render,1000); setInterval(scan,30000);
 @app.route('/api/scan')
 def api():
     out=[]
-    min_ratio=1.65 # PELINO PELINO SOPRA 1.6x
+    min_ratio=1.45 # PELINO PELINO SOPRA 1.6x
     for otc, real in OTC_MAP.items():
         try:
             df=yf.download(real, period="1d", interval="1m", progress=False, auto_adjust=True)
@@ -78,7 +78,7 @@ def api():
             if ratio<min_ratio: continue
             score=min(95,50+int(ratio*10))
             if score<60: continue
-            reason=f"Pin {dire} {ratio:.2f}x - pelino stretto da 1.6"
+            reason=f"Pin {dire} {ratio:.2f}x - pelino stretto da 1.4"
             fmt=f"{c:.5f}" if "JPY" not in otc else f"{c:.2f}"
             out.append({"pair":otc,"dir":dire,"price":fmt,"score":score,"ratio":round(ratio,2),"reason":reason})
             del df; gc.collect()
