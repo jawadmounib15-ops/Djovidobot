@@ -78,7 +78,7 @@ def api():
                 continue
             c=float(df.iloc[-1]['Close']); o=float(df.iloc[-1]['Open']); h=float(df.iloc[-1]['High']); l=float(df.iloc[-1]['Low'])
             body=abs(c-o)
-            if body<0.00002: body=0.00002
+            if body<0.00003: body=0.00003
             up=h-max(o,c); down=min(o,c)-l
             dire=None; ratio=0; reason=""
             if up>body*min_ratio:
@@ -88,10 +88,10 @@ def api():
             else:
                 # se non pinbar, cerca engulfing semplice per non restare vuoto
                 c2=float(df.iloc[-2]['Close']); o2=float(df.iloc[-2]['Open'])
-                if c>o and c2<o2 and c>o2 and mode==60:
-                    dire="BUY"; ratio=1.3; reason="Engulfing BUY (mode 60 largo)"
-                elif c<o and c2>o2 and c<o2 and mode==60:
-                    dire="SELL"; ratio=1.3; reason="Engulfing SELL (mode 60 largo)"
+                if c>o and c2<o2 and c>o2 and mode==65:
+                    dire="BUY"; ratio=1.7; reason="Engulfing BUY (mode 60 largo)"
+                elif c<o and c2>o2 and c<o2 and mode==65:
+                    dire="SELL"; ratio=1.7; reason="Engulfing SELL (mode 60 largo)"
                 else:
                     del df; gc.collect()
                     continue
