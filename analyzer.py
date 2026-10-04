@@ -33,7 +33,7 @@ def scadenza_1m():
     scad = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
     return scad.strftime("%H:%M:%S"), (60 - now.second), scad
 
-def rsi_bb_medio_stretto(o,h,l,c, df):
+def rsi_bb_bilanciato(o,h,l,c, df):
     try:
         sma20 = df['Close'].rolling(20).mean()
         std20 = df['Close'].rolling(20).std()
@@ -46,17 +46,13 @@ def rsi_bb_medio_stretto(o,h,l,c, df):
 
         if len(rsi_series)<3: return None
         rsi_prev = rsi_series.iloc[-2]
+        rsi_now = rsi_series.iloc[-1]
         bb_low_prev = bb_low.iloc[-2]
         bb_up_prev = bb_up.iloc[-2]
         if str(rsi_prev)=='nan' or str(bb_low_prev)=='nan': return None
 
         prev = df.iloc[-2]
         curr = df.iloc[-1]
-
-        # STRINGIAMO:
-        # 1. RSI da 42/58 -> 35/65 (più estremo)
-        # 2. BB deve ROMPERE davvero, non solo avvicinarsi
-        # 3. Serve ombra inversione min 25%
 
         b_curr = abs(curr['Close']-curr['Open'])
         r_curr = curr['High']-curr['Low']
@@ -65,17 +61,32 @@ def rsi_bb_medio_stretto(o,h,l,c, df):
         lo_perc = lo_curr/r_curr if r_curr>0 else 0
         up_perc = up_curr/r_curr if r_curr>0 else 0
 
-        # CALL - più stretto
-        rottura_inf = prev['Close'] < bb_low_prev or prev['Low'] < bb_low_prev*0.9998 # vera rottura
-        if rottura_inf and rsi_prev < 36 and (lo_perc >= 0.28 or curr['Close'] > curr['Open']):
-            score = (35 - rsi_prev) + (lo_perc*20) # punteggio per scegliere migliori
-            return "CALL", int(rsi_prev), "BB LOW ROTTURA", score
+        # BILANCIATO - via di mezzo:
+        # BB: basta avvicinarsi 0.15% (non serve rottura vera come V9.5)
+        # RSI: 40/60 (via di mezzo tra 42/58 largo e 36/64 stretto)
+        # Ombra: 20% basta (non 28% stretto)
 
-        # PUT - più stretto
-        rottura_sup = prev['Close'] > bb_up_prev or prev['High'] > bb_up_prev*1.0002
-        if rottura_sup and rsi_prev > 64 and (up_perc >= 0.28 or curr['Close'] < curr['Open']):
-            score = (rsi_prev - 65) + (up_perc*20)
-            return "PUT", int(rsi_prev), "BB HIGH ROTTURA", score
+        vicino_low = prev['Low'] <= bb_low_prev * 1.0015 # più largo di V9.5
+        vicino_high = prev['High'] >= bb_up_prev * 0.9985
+
+        # CALL BILANCIATO
+        if vicino_low and rsi_prev < 40:
+            if lo_perc >= 0.20 or curr['Close'] > prev['Close']*0.9999:
+                score = (40 - rsi_prev) + lo_perc*10
+                return "CALL", int(rsi_prev), "BB LOW", score
+
+        # PUT BILANCIATO
+        if vicino_high and rsi_prev > 60:
+            if up_perc >= 0.20 or curr['Close'] < prev['Close']*1.0001:
+                score = (rsi_prev - 60) + up_perc*10
+                return "PUT", int(rsi_prev), "BB HIGH", score
+
+        # FALLBACK PINBAR se BB non tocca ma RSI estremo + pinbar forte
+        # Così se mercato calmo trovi lo stesso qualcosa
+        if rsi_prev < 30 and lo_perc >= 0.45:
+            return "CALL", int(rsi_prev), "PINBAR RSI", 5
+        if rsi_prev > 70 and up_perc >= 0.45:
+            return "PUT", int(rsi_prev), "PINBAR RSI", 5
 
         return None
     except:
@@ -85,19 +96,19 @@ def analizza():
     global STORICO
     now = datetime.now(ROMA)
     sec = now.second
-    if not (20 <= sec <= 58):
+    if not (15 <= sec <= 58):
         return {"wait": True, "sec": sec, "signals": [], "storico": STORICO[-20:][::-1]}
 
     out=[]
     try:
         scad_str, rimanenti, scad_dt = scadenza_1m()
-        candidati = []
+        candidati=[]
         for i,(ysym,label) in enumerate(OTC_1M):
             try:
                 df=get_df_safe(ysym)
                 if df is None: continue
                 r=df.iloc[-1]
-                res=rsi_bb_medio_stretto(r['Open'],r['High'],r['Low'],r['Close'], df)
+                res=rsi_bb_bilanciato(r['Open'],r['High'],r['Low'],r['Close'], df)
                 if not res: continue
                 d, rsi, bb, score=res
                 candidati.append({
@@ -109,72 +120,76 @@ def analizza():
                 if i % 5 == 0: time.sleep(0.12)
             except: continue
 
-        # STRINGIAMO: ordina per score migliore e prendi solo TOP 3-4
         candidati.sort(key=lambda x: x['score'], reverse=True)
-        out = candidati[:4] # MAX 4 SEGNALI PER MINUTO, non 14!
+        out = candidati[:5] # MAX 5
 
-        for segnale in out:
-            gia = [s for s in STORICO if s['coppia']==segnale['coppia'] and s['ora'][:5]==now.strftime("%H:%M")]
+        for s in out:
+            gia = [x for x in STORICO if x['coppia']==s['coppia'] and x['ora'][:5]==now.strftime("%H:%M")]
             if not gia:
-                STORICO.append(segnale)
+                STORICO.append(s)
                 if len(STORICO)>100: STORICO = STORICO[-100:]
 
-        return {"wait": False, "sec": sec, "signals": out, "storico": STORICO[-20:][::-1]}
+        return {"wait": False, "sec": sec, "signals": out, "storico": STORICO[-20:][::-1], "debug": f"{len(candidati)} candidati"}
     except Exception as e:
         return {"wait": False, "sec": sec, "signals": out, "storico": STORICO[-20:][::-1], "error": str(e)[:80]}
 
 PAGE="""<!DOCTYPE html><html><head><meta charset=utf-8>
 <meta name=viewport content='width=device-width, initial-scale=1'>
-<title>V9.5 MEDIO STRETTO</title>
+<title>V9.6 BILANCIATO</title>
 <style>
 *{box-sizing:border-box}body{background:#000;color:#fff;font-family:Arial;margin:0;padding:0}
-.header{background:#111;padding:14px;border-bottom:3px solid #ff0;position:sticky;top:0;z-index:10}
-.header h2{margin:0;color:#ff0;font-size:18px}.sub{color:#0f0;font-size:11px}
+.header{background:#111;padding:14px;border-bottom:3px solid #0f0;position:sticky;top:0;z-index:10}
+.header h2{margin:0;color:#0f0;font-size:18px}.sub{color:#ff0;font-size:11px;line-height:1.3}
 .container{padding:10px}.card{border:3px solid #0f0;padding:14px;margin:12px 0;border-radius:14px;background:#151515}
 .card.PUT{border-color:#ff3333}.CALL{color:#0f0;font-size:24px;font-weight:bold}.PUT{color:#ff3333;font-size:24px;font-weight:bold}
 .timer{font-size:34px;font-weight:bold;color:#ff0;text-align:center;padding:10px;background:#222;border-radius:10px;margin:10px 0}
-.countdown{font-size:22px;color:#0f0;text-align:center;font-weight:bold}
+.countdown{font-size:20px;color:#0f0;text-align:center;font-weight:bold}
 button{padding:14px;border:none;border-radius:12px;font-size:16px;font-weight:bold;margin:6px 0;width:100%}
 #unlock{background:#0f0;color:#000}#analyze{background:#222;color:#fff;border:1px solid #555}
-.wait{background:#332200;border:2px solid #ff0;padding:12px;border-radius:12px;text-align:center;margin:8px 0}
 .storico{background:#111;border:1px solid #444;border-radius:12px;padding:10px;margin:15px 0}
 .storico h3{margin:5px 0;color:#ff0;font-size:14px}
 .row{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid #222}
 .row.CALL b{color:#0f0}.row.PUT b{color:#ff3333}
+.debug{font-size:11px;color:#666;text-align:center}
 </style></head><body>
 <div class=header>
-<h2>⚡ V9.5 MEDIO - STRINGIAMO - TOP 4 MAX</h2>
-<div class=sub>STRETTO: RSI 36/64 + Rottura BB vera + Ombra 28% + Max 4 segnali/min + Storico + 30sec</div>
+<h2>✅ V9.6 BILANCIATO - TROVA ORA - MAX 5</h2>
+<div class=sub>BILANCIATO: RSI 40/60 + BB vicino 0.15% + Ombra 20% + Fallback pinbar 45% + Storico + 30sec</div>
 </div>
 <div class=container>
-<div id=status>🟡 V9.5 MEDIO - stringiamo - max 4</div>
+<div id=status>🟡 V9.6 BILANCIATO - trova 2-3 all'ora</div>
 <div id=timer class=timer>00</div>
 <div id=countdown class=countdown></div>
-<button id=unlock onclick=enableAudio()>🔊 AUDIO ON - TOP 4</button>
-<button id=analyze onclick=load()>🔄 SCANSIONA MEDIO</button>
+<div id=debug class=debug></div>
+<button id=unlock onclick=enableAudio()>🔊 AUDIO ON - BILANCIATO</button>
+<button id=analyze onclick=load()>🔄 SCANSIONA BILANCIATO</button>
 <div id=l></div>
-<div class=storico><h3>📜 STORICO ULTIMI 20 - FILTRATO</h3><div id=storico>...</div></div>
+<div class=storico><h3>📜 STORICO ULTIMI 20 - BILANCIATO</h3><div id=storico>Nessun segnale - storico vuoto</div></div>
 </div>
 <audio id=b src=https://cdn.pixabay.com/audio/2022/03/10/audio_1c8c9a0727.mp3 preload=auto></audio>
 <script>
 let audioEnabled=false, lastCount=0;
-function enableAudio(){let a=document.getElementById('b');a.play().then(()=>{a.pause();a.currentTime=0;audioEnabled=true;document.getElementById('unlock').innerText='✅ AUDIO ON - MEDIO';localStorage.setItem('audio','1');}).catch(e=>{});}
-function renderStorico(list){let h=document.getElementById('storico'); if(!list||list.length==0){h.innerHTML='<div style=color:#666>Nessun segnale - storico vuoto</div>';return;} let html=''; list.forEach(s=>{html+=`<div class=row ${s.dir}><span>${s.data} - ${s.coppia}</span><span><b>${s.dir}</b> RSI${s.rsi} Scad ${s.scadenza}</span></div>`;}); h.innerHTML=html;}
+function enableAudio(){let a=document.getElementById('b');a.play().then(()=>{a.pause();a.currentTime=0;audioEnabled=true;document.getElementById('unlock').innerText='✅ AUDIO ON - BILANCIATO';localStorage.setItem('audio','1');}).catch(e=>{});}
+function renderStorico(list){let h=document.getElementById('storico'); if(!list||list.length==0){h.innerHTML='<div style=color:#666>Nessun segnale - storico vuoto - ma ora trova</div>';return;} let html=''; list.forEach(s=>{html+=`<div class=row ${s.dir}><span>${s.data} - ${s.coppia}</span><span><b>${s.dir}</b> RSI${s.rsi} Scad ${s.scadenza}</span></div>`;}); h.innerHTML=html;}
 async function load(){
   try{
     let r=await fetch('/api/signals'); if(!r.ok) throw new Error(r.status);
     let data=await r.json();
     document.getElementById('timer').innerText=':'+String(data.sec).padStart(2,'0')+' sec';
-    if(data.wait){document.getElementById('countdown').innerText='⏰ Avviso tra '+(20-data.sec)+' sec - ora max 4 segnali'; document.getElementById('status').innerHTML='⏳ V9.5 MEDIO aspetto :20 - ora :'+data.sec; renderStorico(data.storico); return;}
+    if(data.debug) document.getElementById('debug').innerText=data.debug+' candidati trovati';
+    if(data.wait){document.getElementById('countdown').innerText='⏰ Avviso tra '+(15-data.sec)+' sec'; document.getElementById('status').innerHTML='⏳ V9.6 BILANCIATO aspetto :15 - ora :'+data.sec; renderStorico(data.storico); return;}
     renderStorico(data.storico);
     let c=document.getElementById('l');
-    if(data.signals.length==0){document.getElementById('status').innerHTML='🟢 MEDIO scan :'+data.sec+' - 0 segnali - filtrato meglio'; document.getElementById('countdown').innerText='✅ Nessuna rottura BB vera ora'; if(lastCount>0){c.innerHTML='';}}
-    else{
-      document.getElementById('status').innerHTML='🔥 '+data.signals.length+' SEGNALI MEDIO (MAX 4) A :'+data.sec+' - '+data.signals[0].rimanenti+' SEC!';
+    if(data.signals.length==0){
+      document.getElementById('status').innerHTML='🟢 BILANCIATO scan :'+data.sec+' - 0 ora - ma trova sicuro';
+      document.getElementById('countdown').innerText='🔍 18 OTC scan - nessun BB vicino ora';
+      if(lastCount>0) c.innerHTML='';
+    } else {
+      document.getElementById('status').innerHTML='🔥 '+data.signals.length+' SEGNALI BILANCIATO A :'+data.sec+' - '+data.signals[0].rimanenti+' SEC!';
       document.getElementById('countdown').innerText='🚨 '+data.signals[0].rimanenti+' SEC PER ENTRARE! SCADE '+data.signals[0].scadenza;
       c.innerHTML=''; data.signals.forEach(s=>{
         let e=document.createElement('div'); e.className='card '+s.dir;
-        e.innerHTML=`<b>${s.coppia} 1M</b> <span style=float:right;font-size:12px>${s.data}</span><br><span class=${s.dir}>${s.dir} 1M MEDIO</span> - ${s.bb} RSI ${s.rsi}<br><div style=margin-top:8px;background:#222;padding:8px;border-radius:8px>⏰ ${s.ora} → SCAD <b style=color:#ff0>${s.scadenza_full}</b> - <b style=color:#0f0>${s.rimanenti} SEC</b></div><div style=margin-top:10px><span style=background:#ff0;color:#000;padding:10px;border-radius:8px;font-weight:bold;display:block;text-align:center>👉 ENTRA 1 MIN - MEDIO</span></div>`;
+        e.innerHTML=`<b>${s.coppia} 1M BILANCIATO</b> <span style=float:right;font-size:11px>${s.data}</span><br><span class=${s.dir}>${s.dir} 1M</span> - ${s.bb} RSI ${s.rsi}<br><div style=margin-top:8px;background:#222;padding:8px;border-radius:8px>⏰ ${s.ora} → SCAD <b style=color:#ff0>${s.scadenza_full}</b> - <b style=color:#0f0>${s.rimanenti} SEC</b></div><div style=margin-top:10px><span style=background:#0f0;color:#000;padding:10px;border-radius:8px;font-weight:bold;display:block;text-align:center>👉 ENTRA 1 MIN - SCADE ${s.scadenza}</span></div>`;
         c.appendChild(e);
       });
       if(audioEnabled && data.signals.length!=lastCount){document.getElementById('b').play().catch(()=>{}); if(navigator.vibrate) navigator.vibrate([500,100,500]);}
