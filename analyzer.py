@@ -9,6 +9,9 @@ app = Flask(__name__)
 session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
 
+# STORICO GLOBALE - rimane fino a restart Render
+STORICO = []
+
 OTC_1M = [
 ("EURUSD=X","EUR/USD OTC"),("GBPUSD=X","GBP/USD OTC"),("USDJPY=X","USD/JPY OTC"),
 ("AUDUSD=X","AUD/USD OTC"),("EURJPY=X","EUR/JPY OTC"),("EURGBP=X","EUR/GBP OTC"),
@@ -29,9 +32,10 @@ def get_df_safe(sym):
 def scadenza_1m():
     now = datetime.now(ROMA)
     scad = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
-    return scad.strftime("%H:%M:%S"), (60 - now.second)
+    rimanenti = 60 - now.second
+    return scad.strftime("%H:%M:%S"), rimanenti, scad
 
-def rsi_bb_largo_max(o,h,l,c, df):
+def rsi_bb_largo(o,h,l,c, df):
     try:
         sma20 = df['Close'].rolling(20).mean()
         std20 = df['Close'].rolling(20).std()
@@ -44,120 +48,195 @@ def rsi_bb_largo_max(o,h,l,c, df):
 
         if len(rsi_series)<3: return None
         rsi_prev = rsi_series.iloc[-2]
-        rsi_now = rsi_series.iloc[-1]
         bb_low_prev = bb_low.iloc[-2]
         bb_up_prev = bb_up.iloc[-2]
-        bb_low_now = bb_low.iloc[-1]
-        bb_up_now = bb_up.iloc[-1]
-
         if str(rsi_prev)=='nan' or str(bb_low_prev)=='nan': return None
 
         prev = df.iloc[-2]
         curr = df.iloc[-1]
 
-        # LARGO MAX: basta AVVICINARSI a BB, non serve rompere
-        vicino_low = prev['Low'] <= bb_low_prev * 1.0008 # tocca o quasi
+        vicino_low = prev['Low'] <= bb_low_prev * 1.0008
         vicino_high = prev['High'] >= bb_up_prev * 0.9992
 
-        # LARGO MAX: RSI 40/60 invece di 35/65 - trova 3x di più
-        if vicino_low and rsi_prev < 42: # prima 35 ora 42
-            # Qualsiasi inversione anche piccola
-            if curr['Close'] > prev['Close']*0.9998: # anche chiusura uguale va bene
-                return "CALL", int(rsi_prev), "BB LOW LARGO", f"Vicino BB {int(rsi_prev)}"
+        if vicino_low and rsi_prev < 42:
+            if curr['Close'] > prev['Close']*0.9998:
+                return "CALL", int(rsi_prev), "BB LOW", int((bb_low_prev-prev['Low'])*10000)
 
-        if vicino_high and rsi_prev > 58: # prima 65 ora 58
+        if vicino_high and rsi_prev > 58:
             if curr['Close'] < prev['Close']*1.0002:
-                return "PUT", int(rsi_prev), "BB HIGH LARGO", f"Vicino BB {int(rsi_prev)}"
+                return "PUT", int(rsi_prev), "BB HIGH", int((prev['High']-bb_up_prev)*10000)
 
         return None
     except:
         return None
 
 def analizza():
+    global STORICO
     now = datetime.now(ROMA)
     sec = now.second
-    if not (15 <= sec <= 58): # da 20 a 15 - 5 sec in più
-        return {"wait": True, "sec": sec, "signals": []}
+    # AVVISO PRIMA DI 30 SEC - come vuoi tu: da :15 a :58
+    if not (15 <= sec <= 58):
+        return {"wait": True, "sec": sec, "signals": [], "storico": STORICO[-20:][::-1]}
+
     out=[]
     try:
-        scad_str, sec_rim = scadenza_1m()
+        scad_str, rimanenti, scad_dt = scadenza_1m()
         for i,(ysym,label) in enumerate(OTC_1M):
             try:
                 df=get_df_safe(ysym)
                 if df is None: continue
                 r=df.iloc[-1]
-                res=rsi_bb_largo_max(r['Open'],r['High'],r['Low'],r['Close'], df)
+                res=rsi_bb_largo(r['Open'],r['High'],r['Low'],r['Close'], df)
                 if not res: continue
-                d, rsi, bb, dett=res
-                out.append({
-                    "coppia":label,"dir":d,"rsi":rsi,"bb":bb,"dett":dett,
+                d, rsi, bb, pip=res
+                segnale = {
+                    "coppia":label,"dir":d,"rsi":rsi,"bb":bb,"pip":pip,
                     "scadenza":scad_str,"ora":now.strftime("%H:%M:%S"),
-                    "rimanenti": sec_rim
-                })
+                    "rimanenti": rimanenti,
+                    "scadenza_full": scad_dt.strftime("%H:%M:%S"),
+                    "data": now.strftime("%d/%m %H:%M:%S")
+                }
+                out.append(segnale)
+
+                # AGGIUNGI A STORICO - evita duplicati stesso minuto stessa coppia
+                gia = [s for s in STORICO if s['coppia']==label and s['ora'][:5]==now.strftime("%H:%M")]
+                if not gia:
+                    STORICO.append(segnale)
+                    if len(STORICO)>100:
+                        STORICO = STORICO[-100:]
+
                 if i % 5 == 0: time.sleep(0.12)
             except: continue
-        return {"wait": False, "sec": sec, "signals": out}
+        return {"wait": False, "sec": sec, "signals": out, "storico": STORICO[-20:][::-1]}
     except Exception as e:
-        return {"wait": False, "sec": sec, "signals": out, "error": str(e)[:80]}
+        return {"wait": False, "sec": sec, "signals": out, "storico": STORICO[-20:][::-1], "error": str(e)[:80]}
 
 PAGE="""<!DOCTYPE html><html><head><meta charset=utf-8>
 <meta name=viewport content='width=device-width, initial-scale=1'>
-<title>V9.3 LARGO MAX</title>
+<title>V9.4 STORICO + SCADENZA</title>
 <style>
 *{box-sizing:border-box}body{background:#000;color:#fff;font-family:Arial;margin:0;padding:0}
-.header{background:#111;padding:14px;border-bottom:3px solid #ff0;position:sticky;top:0}
-.header h2{margin:0;color:#ff0;font-size:18px}.sub{color:#0f0;font-size:11px}
-.container{padding:10px}.card{border:3px solid #0f0;padding:16px;margin:12px 0;border-radius:14px;background:#151515}
-.card.PUT{border-color:#ff3333}.CALL{color:#0f0;font-size:26px;font-weight:bold}.PUT{color:#ff3333;font-size:26px;font-weight:bold}
-.timer{font-size:36px;font-weight:bold;color:#ff0;text-align:center;padding:12px;background:#222;border-radius:10px;margin:10px 0}
-button{padding:16px;border:none;border-radius:12px;font-size:17px;font-weight:bold;margin:8px 0;width:100%}
+.header{background:#111;padding:14px;border-bottom:3px solid #0f0;position:sticky;top:0;z-index:10}
+.header h2{margin:0;color:#0f0;font-size:18px}.sub{color:#ff0;font-size:11px}
+.container{padding:10px}.card{border:3px solid #0f0;padding:14px;margin:12px 0;border-radius:14px;background:#151515}
+.card.PUT{border-color:#ff3333}.CALL{color:#0f0;font-size:24px;font-weight:bold}.PUT{color:#ff3333;font-size:24px;font-weight:bold}
+.timer{font-size:34px;font-weight:bold;color:#ff0;text-align:center;padding:10px;background:#222;border-radius:10px;margin:10px 0}
+.countdown{font-size:22px;color:#0f0;text-align:center;font-weight:bold}
+button{padding:14px;border:none;border-radius:12px;font-size:16px;font-weight:bold;margin:6px 0;width:100%}
 #unlock{background:#0f0;color:#000}#analyze{background:#222;color:#fff;border:1px solid #555}
-.wait{background:#332200;border:2px solid #ff0;padding:15px;border-radius:12px;text-align:center}
+.wait{background:#332200;border:2px solid #ff0;padding:12px;border-radius:12px;text-align:center;margin:8px 0}
+.storico{background:#111;border:1px solid #444;border-radius:12px;padding:10px;margin:15px 0}
+.storico h3{margin:5px 0;color:#ff0;font-size:14px}
+.row{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid #222}
+.row.CALL b{color:#0f0}.row.PUT b{color:#ff3333}
 </style></head><body>
 <div class=header>
-<h2>⚡ V9.3 LARGO MAX - RSI+BB - TROVA DI PIU</h2>
-<div class=sub>LARGO MAX - BB tocco (non rottura) + RSI 42/58 - 18 OTC - 15 sec - Scad 1M</div>
+<h2>✅ V9.4 STORICO + SCADENZA + 30SEC</h2>
+<div class=sub>STORICO 20 ultimi + Scadenza 1M + Avviso a 30 sec + Audio + Vibrazione</div>
 </div>
 <div class=container>
-<div id=status>🟡 V9.3 LARGO MAX - trova di più - poi stringiamo</div>
+<div id=status>🟢 V9.4 Storico attivo</div>
 <div id=timer class=timer>00</div>
-<button id=unlock onclick=enableAudio()>🔊 AUDIO ON</button>
-<button id=analyze onclick=load()>🔄 SCANSIONA LARGO MAX</button>
+<div id=countdown class=countdown></div>
+<button id=unlock onclick=enableAudio()>🔊 ATTIVA AUDIO - AVVISO 30 SEC</button>
+<button id=analyze onclick=load()>🔄 SCANSIONA ORA</button>
 <div id=l></div>
+
+<div class=storico>
+<h3>📜 STORICO ULTIMI 20 SEGNALI</h3>
+<div id=storico>Carico storico...</div>
+</div>
 </div>
 <audio id=b src=https://cdn.pixabay.com/audio/2022/03/10/audio_1c8c9a0727.mp3 preload=auto></audio>
+<audio id=b2 src=https://cdn.pixabay.com/audio/2021/08/04/audio_0625c1539c.mp3 preload=auto></audio>
 <script>
 let audioEnabled=false;
-function enableAudio(){let a=document.getElementById('b');a.play().then(()=>{a.pause();a.currentTime=0;audioEnabled=true;document.getElementById('unlock').innerText='✅ AUDIO ON';localStorage.setItem('audio','1');}).catch(e=>{});}
+let lastSignalCount=0;
+function enableAudio(){let a=document.getElementById('b');a.play().then(()=>{a.pause();a.currentTime=0;audioEnabled=true;document.getElementById('unlock').innerText='✅ AUDIO ON - AVVISO 30 SEC ATTIVO';localStorage.setItem('audio','1');}).catch(e=>{});}
+function renderStorico(list){
+  let h=document.getElementById('storico');
+  if(!list || list.length==0){h.innerHTML='<div style=color:#666>Ancora nessun segnale - storico vuoto</div>'; return;}
+  let html='';
+  list.forEach(s=>{
+    html+=`<div class=row ${s.dir}><span>${s.data} - ${s.coppia}</span><span><b>${s.dir}</b> RSI${s.rsi} Scad ${s.scadenza}</span></div>`;
+  });
+  h.innerHTML=html;
+}
 async function load(){
   try{
     let r=await fetch('/api/signals'); if(!r.ok) throw new Error(r.status);
     let data=await r.json();
     document.getElementById('timer').innerText=':'+String(data.sec).padStart(2,'0')+' sec';
+
+    // AVVISO 30 SEC PRIMA - countdown
+    if(data.wait){
+      let to30 = 15 - data.sec;
+      if(to30>0){
+        document.getElementById('countdown').innerText='⏰ Avviso segnale tra '+to30+' sec';
+        document.getElementById('status').innerHTML='⏳ Aspetto :15 sec - ora :'+data.sec+' - prossimo avviso tra '+to30+'s';
+      } else {
+        document.getElementById('countdown').innerText='🔍 Scansione attiva fino a :58';
+      }
+    } else {
+      if(data.signals.length>0){
+        document.getElementById('countdown').innerText='🚨 '+data.signals[0].rimanenti+' SEC PER ENTRARE! SCADE '+data.signals[0].scadenza;
+      } else {
+        document.getElementById('countdown').innerText='✅ Scansione :'+data.sec+' - nessuna rottura ora';
+      }
+    }
+
     let c=document.getElementById('l');
-    if(data.wait){document.getElementById('status').innerHTML='⏳ LARGO MAX aspetto :15 - ora :'+data.sec; if(data.sec<15){c.innerHTML='<div class=wait>⚡ LARGO MAX<br>BB tocco + RSI 42/58<br>Trova subito - tra '+(15-data.sec)+' sec</div>';} return;}
-    document.getElementById('status').innerHTML='🟢 LARGO MAX scan :'+data.sec+' - 18 OTC';
+    renderStorico(data.storico);
+
+    if(data.wait){
+      if(data.sec < 15 && data.storico.length==0){
+        c.innerHTML='<div class=wait>⏰ AVVISO 30 SEC<br>Segnale tra '+(15-data.sec)+' sec<br>Scadenza 1M + Storico attivo</div>';
+      }
+      return;
+    }
+
     let d=data.signals;
-    if(d.length==0){c.innerHTML='<div style=color:#666;padding:15px;text-align:center>🔍 18 OTC LARGO MAX a :'+data.sec+'<br>Ancora 0 - ma ora trova sicuro</div>';}
-    else{
-      document.getElementById('status').innerHTML='🔥🔥 '+d.length+' SEGNALI LARGO MAX A :'+data.sec+' - '+d[0].rimanenti+' SEC!';
-      c.innerHTML=''; d.forEach(s=>{
+    if(d.length==0){
+      if(lastSignalCount>0){c.innerHTML='';}
+      document.getElementById('status').innerHTML='🟢 Scan :'+data.sec+' - 18 OTC - 0 segnali - Storico '+data.storico.length;
+    } else {
+      document.getElementById('status').innerHTML='🔥 '+d.length+' SEGNALI - AVVISO 30 SEC! '+d[0].rimanenti+' SEC RIMANENTI!';
+      c.innerHTML='';
+      d.forEach(s=>{
         let e=document.createElement('div'); e.className='card '+s.dir;
-        e.innerHTML=`<b>${s.coppia} 1M LARGO MAX</b> <span style=float:right;color:#ff0>${s.ora}</span><br><span class=${s.dir}>${s.dir} - ${s.bb}</span> RSI ${s.rsi}<br><div style=font-size:12px>${s.dett}</div><div style=margin-top:10px>Scade <b>${s.scadenza}</b><br><span style=color:#ff0;font-size:18px>⏰ ${s.rimanenti} SEC!</span><br><br><span style=background:#ff0;color:#000;padding:10px;border-radius:8px;font-weight:bold;display:block;text-align:center>👉 ENTRA 1 MIN LARGO MAX</span></div>`;
+        e.innerHTML=`<b>${s.coppia} 1M</b> <span style=float:right;color:#aaa;font-size:12px>${s.data}</span><br>
+        <span class=${s.dir}>${s.dir} 1M</span> - ${s.bb} RSI ${s.rsi}<br>
+        <div style=margin-top:8px;background:#222;padding:8px;border-radius:8px>
+        ⏰ SEGNALE: <b>${s.ora}</b><br>
+        ⏳ SCADENZA: <b style=color:#ff0;font-size:18px>${s.scadenza_full}</b> (1 MIN)<br>
+        ⏱️ RIMANENTI: <b style=color:#0f0;font-size:20px>${s.rimanenti} SEC PER ENTRARE!</b>
+        </div>
+        <div style=margin-top:10px><span style=background:#0f0;color:#000;padding:10px;border-radius:8px;font-weight:bold;display:block;text-align:center>👉 ENTRA ORA - SCADE ${s.scadenza}</span></div>`;
         c.appendChild(e);
       });
-      if(audioEnabled){document.getElementById('b').play().catch(()=>{}); if(navigator.vibrate) navigator.vibrate([400,100,400]);}
+
+      // AVVISO AUDIO + VIBRAZIONE SOLO SE NUOVO SEGNALE
+      if(audioEnabled && d.length!= lastSignalCount){
+        document.getElementById('b').play().catch(()=>{});
+        setTimeout(()=>{document.getElementById('b2').play().catch(()=>{});},400);
+        if(navigator.vibrate) navigator.vibrate([500,100,500,100,800]);
+      }
+      lastSignalCount=d.length;
     }
-    if(localStorage.getItem('audio')=='1'){audioEnabled=true;document.getElementById('unlock').innerText='✅ AUDIO ON';}
+    if(localStorage.getItem('audio')=='1'){audioEnabled=true;document.getElementById('unlock').innerText='✅ AUDIO ON - AVVISO 30 SEC';}
   }catch(e){document.getElementById('status').innerHTML='❌ '+e.message;}
 }
-setInterval(load,2200); load();
+setInterval(load,2000); load();
 </script></body></html>"""
 
 @app.route('/')
 def home(): return PAGE
 @app.route('/api/signals')
 def sig(): return jsonify(analizza())
+
+@app.route('/api/storico')
+def storico():
+    return jsonify(STORICO[-50:][::-1])
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=10000)
