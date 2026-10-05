@@ -11,11 +11,11 @@ session = cffi_requests.Session(impersonate="chrome")
 ROMA = pytz.timezone("Europe/Rome")
 
 # TUTTE LE COPPIE REALI - 28 invece di 21
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X",
-         "EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","EURNZD=X",
-         "GBPJPY=X","GBPCHF=X","GBPAUD=X","GBPCAD=X","GBPNZD=X",
-         "AUDJPY=X","AUDCAD=X","AUDCHF=X","AUDNZD=X",
-         "CADJPY=X","CHFJPY=X","NZDJPY=X","CADCHF=X","NZDCAD=X","NZDCHF=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X",
+         "EURJPY=X","EURGBP=X","EURCHF=X",
+         "GBPJPY=X","GBPCHF=X","GBPAUD=X","GBPCAD=X",
+         "AUDJPY=X","AUDCAD=X","AUDCHF=X",
+         "CADJPY=X","CHFJPY=X","CADCHF=X"]
 
 STORICO = []
 cooldown = {}
