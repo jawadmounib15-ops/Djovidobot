@@ -68,9 +68,9 @@ def scan():
 
             signal=None
             # STRETT0: RSI più centrale e stoch più estremo
-            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=30 and stoch_k<15:
+            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=35 and stoch_k<15:
                 signal="BUY"
-            if price<float(last['e200']) and tocco_e20 and 64<=rsi_v<=70 and stoch_k>85:
+            if price<float(last['e200']) and tocco_e20 and 64<=rsi_v<=75 and stoch_k>85:
                 signal="SELL"
 
             if signal:
