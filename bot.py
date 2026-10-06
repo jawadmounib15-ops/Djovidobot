@@ -62,7 +62,7 @@ def scan():
             if last['atr'] < last['atr_ma50']*0.40: continue
             if last['atr'] > last['atr_ma50']*1.6: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.0010 # più stretto 0.4% non 0.8%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.005 # più stretto 0.5% non 0.8%
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue # no flat
 
