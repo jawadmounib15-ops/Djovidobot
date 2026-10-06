@@ -16,14 +16,13 @@ PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDU
 
 app = Flask(__name__)
 @app.route('/')
-def home(): return f"V62 PRECISO >60% - {len(PAIRS)} PAIRS - cooldown 90min - fix 23:00"
+def home(): return f"V63 75% EQUILIBRATO - {len(PAIRS)} PAIRS"
 
 pending=[]; cooldown={}
 
 def send(msg):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=10)
     except: pass
-
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
     return df
@@ -41,13 +40,10 @@ def stochastic(df,k=14,d=3):
 
 def scan():
     now=datetime.now(ROMA)
-    # FIX 23:00 MERCATO CHIUSO - non spamma domenica
-    if now.weekday()==5 or now.weekday()==6 or (now.weekday()==4 and now.hour>=23):
-        return
-
+    if now.weekday()==5 or now.weekday()==6 or (now.weekday()==4 and now.hour>=23): return
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=2: break
+        if count_this_scan>=3: break
         clean=symbol.replace("=X","")
         if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
         try:
@@ -61,33 +57,34 @@ def scan():
             df['atr_ma50']=df['atr'].rolling(50).mean()
             df['stoch_k'],_ = stochastic(df)
             last=df.iloc[-1]
+            prev=df.iloc[-2]
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
             e20=float(last['e20']); e200=float(last['e200'])
+            e20_prev=float(prev['e20'])
 
-            # PRECISO: ATR 0.75-1.70 era 0.70-1.8 troppo largo
-            if last['atr'] < last['atr_ma50']*0.75 or last['atr'] > last['atr_ma50']*1.70: continue
-            # PRECISO: tocco EMA20 0.08% era 0.3%
-            if abs(price-e20)/price >= 0.0008: continue
-            # PRECISO: distanza EMA200 0.20% era 0.1%
-            if abs(price-e200)/price < 0.0020: continue
-            # NUOVO: pendenza EMA20
-            e20_slope = float(df['e20'].iloc[-1] - df['e20'].iloc[-3])
-            # NUOVO: candela conferma
-            is_green = float(df['Close'].iloc[-1]) > float(df['Open'].iloc[-1])
+            # EQUILIBRATO 75% - non stretto stretto
+            if last['atr'] < last['atr_ma50']*0.68 or last['atr'] > last['atr_ma50']*1.80: continue
+            if abs(price-e20)/price >= 0.0015: continue # era 0.0008 troppo stretto, ora 0.0015
+            if abs(price-e200)/price < 0.0012: continue # era 0.0020 troppo stretto
+
+            e20_slope = e20 - e20_prev
+            is_green = float(last['Close']) > float(last['Open'])
             is_red = not is_green
+            rsi_prev = float(df['rsi'].iloc[-2])
+            rsi_rising = rsi_v > rsi_prev
+            rsi_falling = rsi_v < rsi_prev
 
             signal=None
-            # LOGICA GIUSTA + PRECISA - >60% WIN
-            # BUY = uptrend + pullback + RSI basso + STO bassissimo + candela verde
-            if price>e200*1.0015 and e20>e200 and e20_slope>0 and 22<=rsi_v<=33 and 8<=stoch_k<=22 and is_green:
+            # 75% WIN - BUY con conferma RSI in risalita + candela verde
+            if price>e200*1.001 and e20>e200 and e20_slope>0 and 27<=rsi_v<=37 and 12<=stoch_k<=26 and is_green and rsi_rising:
                 signal="BUY"
-            # SELL = downtrend + pullback + RSI alto + STO altissimo + candela rossa
-            if price<e200*0.9985 and e20<e200 and e20_slope<0 and 66<=rsi_v<=73 and 78<=stoch_k<=92 and is_red:
+            # 75% WIN - SELL con conferma RSI in discesa + candela rossa
+            if price<e200*0.999 and e20<e200 and e20_slope<0 and 63<=rsi_v<=73 and 74<=stoch_k<=88 and is_red and rsi_falling:
                 signal="SELL"
 
             if signal:
                 if any(p['symbol']==clean for p in pending): continue
-                send(f"🎯 V62 PRECISO {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} Entry {price:.5f} | Slope {e20_slope:+.5f}")
+                send(f"🎯 V63 75% {signal} {clean} RSI {rsi_v:.0f}({rsi_prev:.0f}) STO {stoch_k:.0f} Entry {price:.5f}")
                 pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
                 cooldown[clean]=time.time()
                 count_this_scan+=1
@@ -96,7 +93,7 @@ def scan():
 def check_results():
     now=time.time()
     for p in pending[:]:
-        if now-p['time'] < 300: continue # check dopo 5 min non 1 min
+        if now-p['time'] < 300: continue
         try:
             df=yf.download(p['symbol']+"=X", period="1d", interval="1m", progress=False)
             df=fix_df(df)
@@ -104,13 +101,12 @@ def check_results():
             curr=float(df['Close'].iloc[-1])
             win=(p['signal']=="BUY" and curr>p['entry']) or (p['signal']=="SELL" and curr<p['entry'])
             pct=((curr-p['entry'])/p['entry']*100) if p['signal']=="BUY" else ((p['entry']-curr)/p['entry']*100)
-            send(f"{'WIN ✅ +{:.2f}%'.format(pct) if win else 'LOSS ❌ {:.2f}%'.format(pct)} V62 {p['signal']} {p['symbol']} Entry {p['entry']:.5f} -> {curr:.5f}")
+            send(f"{'WIN ✅' if win else 'LOSS ❌'} V63 75% {p['signal']} {p['symbol']} {pct:+.2f}% {p['entry']:.5f}->{curr:.5f}")
             pending.remove(p)
-        except:
-            pending.remove(p)
+        except: pending.remove(p)
 
 def loop():
-    send(f"🚀 V62 PRECISO AVVIATO - {len(PAIRS)} coppie - LOGICA GIUSTA RSI 22-33/66-73 STO 8-22/78-92 + slope + candela + fix 23:00 - Target >60% WIN")
+    send(f"🚀 V63 EQUILIBRATO 75% AVVIATO - RSI 27-37/63-73 STO 12-26/74-88 + slope + RSI rising + candela - fix 23:00")
     while True:
         try: scan(); check_results()
         except: pass
