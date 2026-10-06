@@ -58,19 +58,19 @@ def scan():
             last=df.iloc[-1]
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
-            # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
-            if last['atr'] < last['atr_ma50']*0.40: continue
-            if last['atr'] > last['atr_ma50']*1.6: continue
+            # STRETT0: ATR 0.75 - 1.70x invece di 0.45-3.2
+            if last['atr'] < last['atr_ma50']*0.75: continue
+            if last['atr'] > last['atr_ma50']*1.70: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.005 # più stretto 0.5% non 0.8%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.002 # più stretto 0.2% non 0.4%
             dist_e200=abs(price-float(last['e200']))/price
-            if dist_e200 < 0.001: continue # no flat
+            if dist_e200 < 0.0008: continue # no flat
 
             signal=None
             # STRETT0: RSI più centrale e stoch più estremo
-            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=35 and stoch_k<20:
+            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=35 and stoch_k<24:
                 signal="BUY"
-            if price<float(last['e200']) and tocco_e20 and 64<=rsi_v<=75 and stoch_k>80:
+            if price<float(last['e200']) and tocco_e20 and 63<=rsi_v<=73 and stoch_k>92:
                 signal="SELL"
 
             if signal:
@@ -86,7 +86,7 @@ def loop():
     while True:
         try: scan(); check_results()
         except: pass
-        time.sleep(60) # scan ogni 1min
+        time.sleep(30) # scan ogni 30sec
 
 threading.Thread(target=loop, daemon=True).start()
 if __name__=="__main__":
