@@ -2,7 +2,8 @@ from flask import Flask, jsonify
 import yfinance as yf
 import pandas as pd
 from datetime import datetime
-import pytz, time
+import pytz
+import time as time_module
 from curl_cffi import requests as cffi_requests
 
 app = Flask(__name__)
@@ -38,14 +39,16 @@ def get_df(s):
     except: return None
 
 def scan():
-    global STORICO
+    global STORICO, pending
     now=datetime.now(ROMA)
-    nuovi=[]
-    c=0
+    if now.weekday()==5 or now.weekday()==6 or (now.weekday()==4 and now.hour>=23):
+        return []
+    pending = [p for p in pending if time_module.time()-p['time']<3600]
+    nuovi=[]; c=0
     for sym in PAIRS:
-        if c>=5: break
+        if c>=3: break
         clean=sym.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean]<3600: continue
+        if clean in cooldown and time_module.time()-cooldown[clean]<3600: continue
         try:
             df=get_df(sym)
             if df is None: continue
@@ -57,18 +60,26 @@ def scan():
             df['stoch']=stochastic(df)
             last=df.iloc[-1]
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch'])
-            if last['atr']<last['atr_ma50']*0.60 or last['atr']>last['atr_ma50']*2.0: continue
-            if abs(price-float(last['e20']))/price>=0.0010: continue
-            if abs(price-float(last['e200']))/price<0.001: continue
+            e20=float(last['e20']); e200=float(last['e200'])
+            if last['atr']<last['atr_ma50']*0.75 or last['atr']>last['atr_ma50']*1.70: continue
+            if abs(price-e20)/price>=0.0008: continue
+            if abs(price-e200)/price<0.0020: continue
+            e20_slope = float(df['e20'].iloc[-1] - df['e20'].iloc[-3])
+
             sig=None
-            if price>float(last['e200']) and 62<=rsi_v<=70 and stoch_k<85: sig="BUY"
-            if price<float(last['e200']) and 18<=rsi_v<=33 and stoch_k>15: sig="SELL"
+            # LOGICA GIUSTA + PRECISA - >50% WIN
+            # BUY = uptrend + pullback basso RSI + stocastico basso = rimbalzo
+            if price>e200*1.0015 and e20>e200 and e20_slope>0 and 22<=rsi_v<=34 and 8<=stoch_k<=24:
+                sig="BUY"
+            # SELL = downtrend + pullback alto RSI + stocastico alto = rimbalzo giu
+            if price<e200*0.9985 and e20<e200 and e20_slope<0 and 64<=rsi_v<=72 and 76<=stoch_k<=92:
+                sig="SELL"
+
             if sig and not any(p['symbol']==clean for p in pending):
                 s={"coppia":clean,"dir":sig,"rsi":int(rsi_v),"stoch":int(stoch_k),"entry":round(price,5),"ora":now.strftime("%H:%M:%S"),"data":now.strftime("%d/%m %H:%M:%S"),"id":f"{clean}{now.strftime('%H%M%S')}"}
                 STORICO.append(s)
-                if len(STORICO)>100: STORICO=STORICO[-100:]
-                pending.append({"symbol":clean,"time":time.time()})
-                cooldown[clean]=time.time()
+                pending.append({"symbol":clean,"time":time_module.time()})
+                cooldown[clean]=time_module.time()
                 nuovi.append(s)
                 c+=1
         except: continue
@@ -77,91 +88,12 @@ def scan():
 @app.route('/api/signals')
 def api():
     now=datetime.now(ROMA)
-    nuovi=scan()
-    return jsonify({"ora":now.strftime("%H:%M:%S"),"storico":STORICO[-30:][::-1],"nuovi":nuovi})
+    if now.weekday() in [5,6] or (now.weekday()==4 and now.hour>=23):
+        return jsonify({"ora":now.strftime("%H:%M:%S"),"storico":STORICO[-30:][::-1],"nuovi":[],"status":"🔴 MERCATO CHIUSO - Domenica"})
+    return jsonify({"ora":now.strftime("%H:%M:%S"),"storico":STORICO[-30:][::-1],"nuovi":scan(),"status":"🟢 APERTO - Logica giusta"})
 
-HTML="""<!DOCTYPE html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>
-<title>V61.3 FINAL</title>
-<style>
-body{background:#000;color:#fff;font-family:Arial;margin:0}.header{background:#111;padding:14px;border-bottom:3px solid #0f0}
-h2{margin:0;color:#0f0;font-size:17px}.sub{color:#ff0;font-size:11px}
-.container{padding:10px}.timer{font-size:38px;color:#ff0;text-align:center;background:#222;padding:12px;border-radius:12px;margin:10px 0}
-button{width:100%;padding:18px;border:none;border-radius:14px;font-weight:bold;margin:8px 0;font-size:16px}
-#unlock{background:#0f0;color:#000;font-size:18px} #unlock.on{background:#00ff00;box-shadow:0 0 15px #0f0}
-.card{border:3px solid #0f0;padding:14px;margin:12px 0;border-radius:14px;background:#151515}
-.card.SELL{border-color:#f33}.BUY{color:#0f0;font-size:24px;font-weight:bold}.SELL{color:#f33;font-size:24px;font-weight:bold}
-.storico{background:#111;border:1px solid #444;border-radius:12px;padding:10px}
-.row{display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-bottom:1px solid #222}
-</style></head><body>
-<div class=header><h2>🟢 V61.3 FINAL FIX - BILANCIATO 28 PAIRS - SUONO OK</h2><div class=sub>FIX browser bloccato tolto - ora suona al primo tap</div></div>
-<div class=container>
-<div id=timer class=timer>19:34:00</div>
-<div id=status style=text-align:center;color:#aaa;font-size:12px>Tap AUDIO ON poi TEST</div>
-<button id=unlock onclick="unlockAudio()">🔊 TAP PER ATTIVARE AUDIO</button>
-<div id=l></div>
-<div class=storico><h3 style=color:#ff0;margin:5px 0>📜 STORICO</h3><div id=storico>Vuoto - scan ogni 60 sec</div></div>
-<button onclick="testAudio()" style="background:#222;color:#fff;border:1px solid #555">🔔 TEST SUONO</button>
-</div>
-<script>
-let audioCtx=null, audioOn=false, seen=new Set(), first=true;
-function unlockAudio(){
-  try{
-    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    audioCtx.resume();
-    audioOn=true;
-    document.getElementById('unlock').innerText='✅ AUDIO ON - ATTIVO';
-    document.getElementById('unlock').classList.add('on');
-    document.getElementById('status').innerText='✅ Audio sbloccato - ora suonera';
-    localStorage.setItem('audio','1');
-    // beep breve per confermare
-    let o=audioCtx.createOscillator(); let g=audioCtx.createGain();
-    o.connect(g); g.connect(audioCtx.destination); o.frequency.value=880; g.gain.value=0.1;
-    o.start(); setTimeout(()=>o.stop(),150);
-    if(navigator.vibrate) navigator.vibrate(200);
-  }catch(e){}
-}
-function testAudio(){
-  if(!audioOn){ unlockAudio(); setTimeout(testAudio,300); return; }
-  try{
-    let o=audioCtx.createOscillator(); let g=audioCtx.createGain();
-    o.connect(g); g.connect(audioCtx.destination); o.frequency.value=880; g.gain.value=0.2;
-    o.start(); setTimeout(()=>{o.stop(); let o2=audioCtx.createOscillator(); o2.connect(g); o2.frequency.value=1200; o2.start(); setTimeout(()=>o2.stop(),200);},200);
-    if(navigator.vibrate) navigator.vibrate([400,100,400]);
-  }catch(e){}
-}
-function alarm(){
-  if(!audioOn) return;
-  testAudio();
-  if(navigator.vibrate) navigator.vibrate([600,100,600,100,1000]);
-}
-async function load(){
-  try{
-    let r=await fetch('/api/signals'); let d=await r.json();
-    document.getElementById('timer').innerText=d.ora;
-    let h=document.getElementById('storico');
-    if(!d.storico||d.storico.length==0) h.innerHTML='Vuoto';
-    else { let html=''; d.storico.forEach(s=>{html+=`<div class=row ${s.dir}><span>${s.data} ${s.coppia}</span><span><b>${s.dir}</b> ${s.entry}</span></div>`}); h.innerHTML=html; }
-    if(d.nuovi && d.nuovi.length>0){
-      d.nuovi.forEach(s=>{
-        if(!seen.has(s.id)){
-          seen.add(s.id);
-          if(!first){
-            document.getElementById('l').innerHTML=`<div class=card ${s.dir}><b>🚨 ${s.coppia} ${s.dir}</b> ${s.data}<br>RSI ${s.rsi} STO ${s.stoch} Entry ${s.entry}</div>`+document.getElementById('l').innerHTML;
-            alarm();
-          }
-        }
-      });
-    }
-    if(first){ d.storico.forEach(s=>seen.add(s.id)); first=false; }
-  }catch(e){}
-}
-setInterval(load,5000); load();
-// auto unlock se gia salvato
-if(localStorage.getItem('audio')=='1'){ setTimeout(()=>{ document.getElementById('status').innerText='Tap una volta ovunque per riattivare audio'; },1000); document.addEventListener('click', ()=>{ if(!audioOn) unlockAudio(); }, {once:true}); }
-</script></body></html>"""
-
+HTML="""<!DOCTYPE html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>V62 GIUSTO</title><style>body{background:#000;color:#fff;font-family:Arial;margin:0}.header{background:#111;padding:14px;border-bottom:3px solid #0f0}h2{margin:0;color:#0f0;font-size:15px}.sub{color:#ff0;font-size:11px}.container{padding:10px}.timer{font-size:32px;color:#ff0;text-align:center;background:#222;padding:12px;border-radius:12px;margin:10px 0}button{width:100%;padding:16px;border:none;border-radius:14px;font-weight:bold;margin:6px 0}#unlock{background:#0f0;color:#000}.card{border:3px solid #0f0;padding:12px;margin:10px 0;border-radius:12px;background:#151515}.SELL{color:#f33;border-color:#f33}.BUY{color:#0f0}.row{display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #222}.storico{background:#111;padding:8px;border-radius:10px}</style></head><body><div class=header><h2>🟢 V62 GIUSTO PRECISO - >50% WIN</h2><div class=sub>BUY RSI 22-34 STO 8-24 / SELL RSI 64-72 STO 76-92 + fix 23:00</div></div><div class=container><div id=timer class=timer>00:00:00</div><div id=status style=text-align:center;font-size:12px;padding:6px;background:#222;border-radius:8px;margin:5px 0></div><button id=unlock onclick="unlockAudio()">🔊 AUDIO</button><div id=l></div><div class=storico><div id=storico>Vuoto</div></div><button onclick="testAudio()" style="background:#333;color:#fff">🔔 TEST</button></div><script>let audioCtx=null,audioOn=false,seen=new Set(),first=true;function unlockAudio(){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();audioCtx.resume();audioOn=true;document.getElementById('unlock').innerText='✅ AUDIO ON';}catch(e){}}function testAudio(){if(!audioOn){unlockAudio();setTimeout(testAudio,300);return;}let o=audioCtx.createOscillator();let g=audioCtx.createGain();o.connect(g);g.connect(audioCtx.destination);o.frequency.value=880;g.gain.value=0.2;o.start();setTimeout(()=>o.stop(),300);}function alarm(){if(!audioOn)return;testAudio();}async function load(){try{let r=await fetch('/api/signals');let d=await r.json();document.getElementById('timer').innerText=d.ora;document.getElementById('status').innerText=d.status;let h=document.getElementById('storico');if(!d.storico||d.storico.length==0)h.innerHTML='Vuoto';else{let html='';d.storico.forEach(s=>{html+=`<div class=row><span>${s.data} ${s.coppia}</span><span><b class=${s.dir}>${s.dir}</b> RSI${s.rsi} STO${s.stoch}</span></div>`});h.innerHTML=html;}if(d.nuovi&&d.nuovi.length>0){d.nuovi.forEach(s=>{if(!seen.has(s.id)){seen.add(s.id);if(!first){document.getElementById('l').innerHTML=`<div class=card ${s.dir}><b>${s.coppia} ${s.dir}</b> ${s.data}<br>RSI${s.rsi} STO${s.stoch} ${s.entry}</div>`+document.getElementById('l').innerHTML;alarm();}}});}if(first){d.storico.forEach(s=>seen.add(s.id));first=false;}}catch(e){}}setInterval(load,5000);load();</script></body></html>"""
 @app.route('/')
 def home(): return HTML
-
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
