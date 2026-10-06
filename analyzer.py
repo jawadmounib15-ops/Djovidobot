@@ -58,11 +58,11 @@ def scan():
             last=df.iloc[-1]
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch'])
             if last['atr']<last['atr_ma50']*0.60 or last['atr']>last['atr_ma50']*2.0: continue
-            if abs(price-float(last['e20']))/price>=0.0028: continue
+            if abs(price-float(last['e20']))/price>=0.0010: continue
             if abs(price-float(last['e200']))/price<0.001: continue
             sig=None
-            if price>float(last['e200']) and 62<=rsi_v<=75 and stoch_k<80: sig="BUY"
-            if price<float(last['e200']) and 18<=rsi_v<=33 and stoch_k>20: sig="SELL"
+            if price>float(last['e200']) and 62<=rsi_v<=70 and stoch_k<85: sig="BUY"
+            if price<float(last['e200']) and 18<=rsi_v<=33 and stoch_k>15: sig="SELL"
             if sig and not any(p['symbol']==clean for p in pending):
                 s={"coppia":clean,"dir":sig,"rsi":int(rsi_v),"stoch":int(stoch_k),"entry":round(price,5),"ora":now.strftime("%H:%M:%S"),"data":now.strftime("%d/%m %H:%M:%S"),"id":f"{clean}{now.strftime('%H%M%S')}"}
                 STORICO.append(s)
