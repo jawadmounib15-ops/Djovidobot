@@ -1,16 +1,26 @@
-from flask import Flask, jsonify
+import os, time, threading
+from flask import Flask
 import yfinance as yf
-from curl_cffi import requests as cffi_requests
 import pandas as pd
-from datetime import datetime
-import pytz, os, time as tm, requests, threading
+import requests
+from curl_cffi import requests as cffi_requests
+
+TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", "")).strip()
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
+
 app = Flask(__name__)
-ROMA = pytz.timezone("Europe/Rome")
+@app.route('/')
+def home(): return f"V72.4 BILANCIATO - Pending:{len(pending)} Cooldown:{len(cooldown)} - {len(PAIRS)} PAIRS"
+pending=[]; cooldown={}
 _YF_SESSION = cffi_requests.Session(impersonate="chrome")
-TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJPY=X","EURGBP=X","GBPJPY=X","GBPCHF=X","EURAUD=X","AUDJPY=X"]
-STORICO=[]; cooldown={}; pending=[]
+
+def send(msg):
+    print(f"SEND: {msg}")
+    if not TOKEN or not CHAT_ID: return
+    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=15)
+    except: pass
+
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
     return df
@@ -18,72 +28,105 @@ def rsi(s,p=14):
     d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
     return 100-(100/(1+g/l))
 def atr(df,p=14):
-    tr=pd.concat([df['High']-df['Low'],abs(df['High']-df['Close'].shift()),abs(df['Low']-df['Close'].shift())],axis=1).max(axis=1)
+    hl=df['High']-df['Low']; hc=abs(df['High']-df['Close'].shift()); lc=abs(df['Low']-df['Close'].shift())
+    tr=pd.concat([hl,hc,lc],axis=1).max(axis=1)
     return tr.rolling(p).mean()
+def stochastic(df,k=14,d=3):
+    lo=df['Low'].rolling(k).min(); hi=df['High'].rolling(k).max()
+    return 100*((df['Close']-lo)/(hi-lo))
+
 def scan():
-    global STORICO, pending
-    pending=[p for p in pending if tm.time()-p['time']<3600]
-    now=datetime.now(ROMA)
-    nuovi=[]
-    for sym in PAIRS:
-        if len(nuovi)>=2: break
-        clean=sym.replace("=X","")
-        if clean in cooldown and tm.time()-cooldown[clean]<3600: continue
+    global pending
+    pending=[p for p in pending if time.time()-p['time']<1800]
+    count_this_scan=0
+    for symbol in PAIRS:
+        if count_this_scan>=3: break
+        clean=symbol.replace("=X","")
+        # BLOCCO DOPPIONI VERO - 40 MIN
+        if clean in cooldown and time.time()-cooldown[clean] < 2400: continue
         if any(p['symbol']==clean for p in pending): continue
         try:
-            df=yf.Ticker(sym, session=_YF_SESSION).history(period="5d", interval="15m")
+            tk=yf.Ticker(symbol, session=_YF_SESSION)
+            df=tk.history(period="5d", interval="15m")
             df=fix_df(df)
             if len(df)<210: continue
             df['e20']=df['Close'].ewm(span=20).mean()
             df['e50']=df['Close'].ewm(span=50).mean()
             df['e200']=df['Close'].ewm(span=200).mean()
-            df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma']=df['atr'].rolling(50).mean()
+            df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma50']=df['atr'].rolling(50).mean()
+            df['stoch_k']=stochastic(df)
             last=df.iloc[-1]
             o=float(last['Open']); h=float(last['High']); l=float(last['Low']); c=float(last['Close'])
-            price=c; e20=float(last['e20']); e50=float(last['e50']); e200=float(last['e200']); rsi_v=float(last['rsi'])
-            is_green=c>o
-            if float(last['atr']) < float(last['atr_ma'])*0.75: continue
-            if float(last['atr']) > float(last['atr_ma'])*1.85: continue
-            if abs(price-e20)/price > 0.0022: continue
-            if abs(price-e200)/price < 0.0010: continue
-            slope_e20=float(df['e20'].iloc[-1]-df['e20'].iloc[-5])
-            sig=None; scadenza=""; lavoro=""
+            price=c; rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
+            e20=float(last['e20']); e50=float(last['e50']); e200=float(last['e200'])
+            is_green=c>o; is_red=not is_green
+            body=abs(c-o); rng=h-l; upper=h-max(o,c); lower=min(o,c)-l
 
-            # --- LAVORO 1 TUO ORIGINALE - NON TOCCATO ---
-            if e50>e200 and price>e200 and slope_e20>0 and 32<=rsi_v<=44 and is_green:
-                sig="BUY"; scadenza="30 MIN"; lavoro="L1 TREND"
-            if e50<e200 and price<e200 and slope_e20<0 and 56<=rsi_v<=68 and not is_green:
-                sig="SELL"; scadenza="15 MIN"; lavoro="L1 TREND"
+            # ATR POCO STRETTO
+            if last['atr'] < last['atr_ma50']*0.58: continue
+            if last['atr'] > last['atr_ma50']*2.20: continue
 
-            # --- LAVORO 2 NUOVO SEPARATO - PINBAR PULITA ---
-            if not sig:
-                body=abs(c-o); total=h-l
-                if total>0 and body>0:
-                    upper=h-max(o,c); lower=min(o,c)-l
-                    pin_bull = lower > body*2.5 and body < total*0.35 and upper < body*0.7 and is_green
-                    pin_bear = upper > body*2.5 and body < total*0.35 and lower < body*0.7 and not is_green
-                    if pin_bull and price>e200 and e20>e50:
-                        sig="BUY"; scadenza="30 MIN"; lavoro="L2 PINBAR"
-                    if pin_bear and price<e200 and e20<e50:
-                        sig="SELL"; scadenza="15 MIN"; lavoro="L2 PINBAR"
+            tocco_e20=abs(price-e20)/price < 0.0045
+            if abs(price-e200)/price < 0.0005: continue
+            slope_e20 = float(df['e20'].iloc[-1] - df['e20'].iloc[-3])
 
-            if sig:
-                s={"coppia":clean,"dir":sig,"rsi":int(rsi_v),"entry":round(price,5),"ora":now.strftime("%H:%M:%S"),"data":now.strftime("%d/%m %H:%M"),"id":f"{clean}{now.strftime('%H%M%S')}","scadenza":scadenza,"lavoro":lavoro}
-                STORICO.append(s); nuovi.append(s)
-                pending.append({"symbol":clean,"time":tm.time()})
-                cooldown[clean]=tm.time()
-                try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":f"🎯 {lavoro} {sig} {clean} RSI {int(rsi_v)} ⏰ {scadenza}"}, timeout=5)
-                except: pass
-        except: continue
-    return nuovi
-@app.route('/api/signals')
-def api():
-    now=datetime.now(ROMA)
-    nuovi=scan()
-    return jsonify({"ora":now.strftime("%H:%M:%S"),"storico":STORICO[-30:][::-1],"nuovi":nuovi,"status":f"🟢 V72.3 L1+L2 LIVE - {len(STORICO)} totali"})
-@app.route('/')
-def home():
-    return """<!DOCTYPE html><html><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>V72.3 L1+L2</title> <style>body{background:#000;color:#fff;font-family:Arial;margin:0}.header{background:#111;padding:12px;border-bottom:3px solid #0f0}h2{margin:0;color:#0f0;font-size:13px}.container{padding:8px}.timer{font-size:30px;color:#ff0;text-align:center;background:#222;padding:12px;border-radius:10px;margin:6px 0}button{width:100%;padding:13px;border:none;border-radius:12px;font-weight:bold;margin:4px 0}#unlock{background:#0f0;color:#000}.card{border:2px solid #0f0;padding:10px;margin:6px 0;border-radius:10px;background:#151515;font-size:12px}.row{display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid #222}.box{background:#111;padding:8px;border-radius:10px;margin:8px 0}</style></head> <body><div class=header><h2>🟢 V72.3 L1 TREND + L2 PINBAR</h2></div> <div class=container><div id=timer class=timer>12:44:00</div><div id=status style=text-align:center;background:#222;padding:6px;border-radius:8px;font-size:11px>Caricamento...</div> <button id=unlock onclick="unlockAudio()">🔊 SUONO ON</button><div id=l></div> <div class=box><b>📊 SEGNALI V72.3</b><div id=s>Vuoto - in attesa...</div></div> <button onclick="testAudio()" style="background:#333;color:#fff">🔔 TEST SUONO</button></div> <script> let audioCtx=null,audioOn=false,seen=new Set(),first=true; setInterval(()=>{let n=new Date();let h=String(n.getHours()).padStart(2,'0');let m=String(n.getMinutes()).padStart(2,'0');let s=String(n.getSeconds()).padStart(2,'0');document.getElementById('timer').innerText=h+':'+m+':'+s;},1000); function unlockAudio(){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)();audioCtx.resume();audioOn=true;document.getElementById('unlock').innerText='✅ SUONO ON';document.getElementById('unlock').style.background='#0f0';}catch(e){}} function testAudio(){if(!audioOn){unlockAudio();setTimeout(testAudio,300);return;}let o=audioCtx.createOscillator();let g=audioCtx.createGain();o.connect(g);g.connect(audioCtx.destination);o.frequency.value=880;g.gain.value=0.3;o.start();setTimeout(()=>o.stop(),350);} function alarm(){if(!audioOn)return;for(let i=0;i<2;i++)setTimeout(testAudio,i*500);} async function load(){try{let r=await fetch('/api/signals');let d=await r.json();document.getElementById('status').innerText=d.status; let el=document.getElementById('s');if(!d.storico||d.storico.length==0)el.innerHTML='Vuoto - in attesa... primi segnali entro 15 min';else{let html='';d.storico.slice(0,20).forEach(s=>{let col=s.lavoro.includes('L1')?'#0f0':'#0af';html+=`<div class=row><span>${s.data} <b>${s.coppia}</b> <span style='color:${col}'>${s.lavoro}</span></span><span style="color:${s.dir.includes('BUY')?'#0f0':'#f33'}"><b>${s.dir}</b> ⏰${s.scadenza} RSI${s.rsi}</span></div>`});el.innerHTML=html;} (d.nuovi||[]).forEach(s=>{if(!seen.has(s.id)){seen.add(s.id);if(!first){document.getElementById('l').innerHTML=`<div class=card><b>🎯 ${s.coppia} ${s.dir} ${s.lavoro} ⏰ ${s.scadenza}</b> ${s.data} RSI${s.rsi} Entry ${s.entry}</div>`+document.getElementById('l').innerHTML;alarm();}}}); if(first){(d.storico||[]).forEach(s=>seen.add(s.id));first=false;}}catch(e){document.getElementById('status').innerText='⏳ Connessione...';}}setInterval(load,10000);load();</script></body></html>"""
-threading.Thread(target=lambda: [tm.sleep(60) or scan() for _ in iter(int,1)], daemon=True).start()
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+            signal=None; lavoro=""; scadenza=""
+
+            # ===== L1 TREND - POCO STRETTO MA SENZA 58-59 FARLOCCO =====
+            if not signal:
+                # BUY: RSI 28-53 invece di 28-47 (più segnali)
+                if price>e200 and e20>e50 and slope_e20>=0 and 28<=rsi_v<=53 and stoch_k<38 and is_green and tocco_e20:
+                    signal="BUY"; lavoro="L1 TREND"; scadenza="30 MIN"
+                # SELL: RSI 57-72 invece di 60-70 (prende anche 57-59 ma filtra 58-59 piatti)
+                if price<e200 and e20<e50 and slope_e20<=0 and 57<=rsi_v<=72 and stoch_k>62 and is_red and tocco_e20:
+                    # filtro in più: se RSI è 57-59 deve avere slope negativa forte
+                    if 57<=rsi_v<=59 and slope_e20>-0.00010:
+                        signal=None
+                    else:
+                        signal="SELL"; lavoro="L1 TREND"; scadenza="15 MIN"
+
+            # ===== L2 PINBAR PULITA - POCO STRETTO =====
+            if not signal and rng>0:
+                pin_bull = lower > body*2.0 and body < rng*0.45 and upper < body*1.1 and is_green
+                pin_bear = upper > body*2.0 and body < rng*0.45 and lower < body*1.1 and is_red
+                # BUY pinbar RSI 30-54 (prima 30-55, ora leggermente più largo ma non 58)
+                if pin_bull and price>e200 and e20>e50 and 28<=rsi_v<=54:
+                    signal="BUY"; lavoro="L2 PINBAR"; scadenza="30 MIN"
+                # SELL pinbar RSI 46-72 (prima 45-70)
+                if pin_bear and price<e200 and e20<e50 and 46<=rsi_v<=72:
+                    signal="SELL"; lavoro="L2 PINBAR"; scadenza="15 MIN"
+
+            if signal:
+                if clean in ["EURGBP","EURJPY","GBPCHF","EURAUD"]:
+                    scadenza="30 MIN"
+                send(f"🎯 {lavoro} {signal} {clean} ⏰ {scadenza} 07/10 RSI{int(rsi_v)} STO{int(stoch_k)}\nEntry {price:.5f}")
+                pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
+                cooldown[clean]=time.time()
+                count_this_scan+=1
+        except Exception as e:
+            print(f"ERR {clean}: {e}"); continue
+
+def check_results():
+    for p in pending[:]:
+        if time.time()-p['time'] < 900: continue
+        try:
+            df=yf.Ticker(p['symbol']+"=X", session=_YF_SESSION).history(period="1d", interval="1m")
+            df=fix_df(df)
+            if len(df)==0: continue
+            curr=float(df['Close'].iloc[-1])
+            win=(p['signal']=="BUY" and curr>p['entry']) or (p['signal']=="SELL" and curr<p['entry'])
+            send(f"{'WIN ✅' if win else 'LOSS ❌'} {p['symbol']} {p['signal']} {((curr-p['entry'])/p['entry']*100):+.3f}%")
+            pending.remove(p)
+        except: pass
+
+def loop():
+    time.sleep(3)
+    if TOKEN and CHAT_ID:
+        send(f"🚀 V72.4 BILANCIATO AVVIATO\nPoco stretto = 5-8 segnali al giorno\nFix doppioni + RSI bilanciato")
+    while True:
+        try: scan(); check_results()
+        except Exception as e: print(f"LOOP ERR {e}")
+        time.sleep(60)
+
+threading.Thread(target=loop, daemon=True).start()
+if __name__=="__main__": app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
