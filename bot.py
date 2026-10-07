@@ -7,19 +7,20 @@ from curl_cffi import requests as cffi_requests
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", "")).strip()
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
-
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 
 app = Flask(__name__)
+
 @app.route('/')
 def home():
-    return f"V61.4 SBLOCCATO - TOKEN:{bool(TOKEN)} CHAT:{bool(CHAT_ID)} - Pending:{len(pending)} - Cooldown:{len(cooldown)} - {len(PAIRS)} PAIRS"
+    return f"V61.5 SBLOCCATO L1+L2 - TOKEN:{bool(TOKEN)} CHAT:{bool(CHAT_ID)} - Pending:{len(pending)} - Cooldown:{len(cooldown)} - {len(PAIRS)} PAIRS"
 
 pending=[]; cooldown={}
 _YF_SESSION = cffi_requests.Session(impersonate="chrome")
 
 def send(msg):
     print(f"SEND: {msg}")
+    if not TOKEN or not CHAT_ID: return
     try:
         r=requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=15)
         print(f"TG RESP: {r.status_code}")
@@ -43,12 +44,12 @@ def stochastic(df,k=14,d=3):
 
 def scan():
     global pending
-    pending=[p for p in pending if time.time()-p['time']<3600]
+    pending=[p for p in pending if time.time()-p['time']<1800] # 30min invece di 60min
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=2: break
+        if count_this_scan>=3: break # 3 segnali per giro invece di 2
         clean=symbol.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean] < 3600: continue # prima 5400 -> 3600
+        if clean in cooldown and time.time()-cooldown[clean] < 1800: continue # 1800 invece di 3600
         if any(p['symbol']==clean for p in pending): continue
         try:
             tk=yf.Ticker(symbol, session=_YF_SESSION)
@@ -61,29 +62,51 @@ def scan():
             df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma50']=df['atr'].rolling(50).mean()
             df['stoch_k'],_ = stochastic(df)
             last=df.iloc[-1]
-            price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
+            o=float(last['Open']); h=float(last['High']); l=float(last['Low']); c=float(last['Close'])
+            price=c; rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
             e20=float(last['e20']); e50=float(last['e50']); e200=float(last['e200'])
-            is_green=float(last['Close'])>float(last['Open'])
-            is_red=not is_green
+            is_green=c>o; is_red=not is_green
 
-            if last['atr'] < last['atr_ma50']*0.65: continue
-            if last['atr'] > last['atr_ma50']*1.95: continue
-            tocco_e20=abs(price-e20)/price < 0.0030 # prima 0.0022 -> 0.0030 SBLOCCA
+            body=abs(c-o); total_range=h-l
+            upper=h-max(o,c); lower=min(o,c)-l
+
+            # FILTRO ATR ALLARGATO
+            if last['atr'] < last['atr_ma50']*0.55: continue
+            if last['atr'] > last['atr_ma50']*2.10: continue
+
+            tocco_e20=abs(price-e20)/price < 0.0040 # da 0.0030 a 0.0040
             dist_e200=abs(price-e200)/price
-            if dist_e200 < 0.0008: continue # prima 0.0015 -> 0.0008 SBLOCCA
+            if dist_e200 < 0.0005: continue # da 0.0008 a 0.0005
 
             slope_e20 = float(df['e20'].iloc[-1] - df['e20'].iloc[-4])
-            slope_e50 = float(df['e50'].iloc[-1] - df['e50'].iloc[-4])
 
-            signal=None
-            # FIX SBLOCCO: RSI più largo e STOCH più largo
-            if price>e200 and e20>e50 and slope_e20>0 and tocco_e20 and 30<=rsi_v<=44 and stoch_k<28 and is_green:
-                signal="BUY"
-            if price<e200 and e20<e50 and slope_e20<0 and tocco_e20 and 56<=rsi_v<=70 and stoch_k>72 and is_red:
-                signal="SELL"
+            signal=None; lavoro=""; scadenza=""
+
+            # ========== LAVORO 1 - TREND TUO SBLOCCATO ==========
+            # Prima avevi 30-44 e 56-70 con stoch 28/72 - ora 28-47 e 53-72 con stoch 35/65
+            if not signal:
+                if price>e200 and e20>e50 and slope_e20>=0 and 28<=rsi_v<=47 and stoch_k<35 and is_green:
+                    if tocco_e20 or 28<=rsi_v<=35: # se RSI basso entra anche senza tocco perfetto
+                        signal="BUY"; lavoro="L1 TREND"; scadenza="30 MIN"
+                if price<e200 and e20<e50 and slope_e20<=0 and 53<=rsi_v<=72 and stoch_k>65 and is_red:
+                    if tocco_e20 or 65<=rsi_v<=72:
+                        signal="SELL"; lavoro="L1 TREND"; scadenza="15 MIN"
+
+            # ========== LAVORO 2 - PINBAR PULITA SEPARATO ==========
+            if not signal and total_range>0 and body>0:
+                # Pinbar pulita: coda lunga 2.2x body, body <40% range
+                pin_bull = lower > body*2.2 and body < total_range*0.40 and upper < body*0.9 and is_green
+                pin_bear = upper > body*2.2 and body < total_range*0.40 and lower < body*0.9 and is_red
+                if pin_bull and price>e200 and e20>e50 and 30<=rsi_v<=55:
+                    signal="BUY"; lavoro="L2 PINBAR"; scadenza="30 MIN"
+                if pin_bear and price<e200 and e20<e50 and 45<=rsi_v<=70:
+                    signal="SELL"; lavoro="L2 PINBAR"; scadenza="15 MIN"
 
             if signal:
-                send(f"🎯 V61.4 {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} Entry {price:.5f}")
+                # Coppie lente sempre 30 MIN
+                if clean in ["EURGBP","EURJPY","GBPCHF","EURAUD"]:
+                    scadenza="30 MIN"
+                send(f"🎯 {lavoro} {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} ⏰ {scadenza}\nEntry {price:.5f}")
                 pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
                 cooldown[clean]=time.time()
                 count_this_scan+=1
@@ -92,16 +115,15 @@ def scan():
             continue
 
 def check_results():
-    now=time.time()
     for p in pending[:]:
-        if now-p['time'] < 180: continue
+        if time.time()-p['time'] < 900: continue # check dopo 15min invece di 3min
         try:
             df=yf.Ticker(p['symbol']+"=X", session=_YF_SESSION).history(period="1d", interval="1m")
             df=fix_df(df)
             if len(df)==0: continue
             curr=float(df['Close'].iloc[-1])
             win=(p['signal']=="BUY" and curr>p['entry']) or (p['signal']=="SELL" and curr<p['entry'])
-            send(f"{'WIN ✅' if win else 'LOSS ❌'} V61.4 {p['signal']} {p['symbol']} {((curr-p['entry'])/p['entry']*100):+.2f}%")
+            send(f"{'WIN ✅' if win else 'LOSS ❌'} {p['symbol']} {p['signal']} {((curr-p['entry'])/p['entry']*100):+.3f}%")
             pending.remove(p)
         except: pass
 
@@ -110,7 +132,7 @@ def loop():
     if not TOKEN or not CHAT_ID:
         print("MANCA TOKEN/CHAT_ID!")
     else:
-        send(f"🚀 V61.4 SBLOCCATO AVVIATO - {len(PAIRS)} coppie - Se leggi questo, Telegram OK! Ora cerco segnali...")
+        send(f"🚀 V61.5 SBLOCCATO L1+L2 AVVIATO - {len(PAIRS)} coppie\nL1 TREND allargato + L2 PINBAR pulita\nOra dovresti ricevere 4-8 segnali al giorno")
     while True:
         try:
             scan()
