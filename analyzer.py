@@ -11,69 +11,39 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 
 app = Flask(__name__)
-pending=[]; cooldown={}; history=[]; last_debug="Avvio Analyzer V73..."
-last_history_count=0
+pending=[]; cooldown={}; history=[]; last_debug="Avvio V74 LOOSE..."
 _YF_SESSION = cffi_requests.Session(impersonate="chrome")
 
 HTML = """
 <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Analyzer Pinbar 5MIN</title>
 <style>
 body{background:#0e0e0e;color:#fff;font-family:Arial;margin:0;padding:10px}
 .top{text-align:center;color:#ffeb00;font-size:32px;font-weight:bold;padding:15px;background:#1a1a1a;border-radius:12px;margin-bottom:10px}
 .badge{text-align:center;background:#2a2a2a;padding:10px;border-radius:10px;margin-bottom:10px;font-size:14px}
-.green{background:#00e676;color:#000;padding:12px;border-radius:10px;text-align:center;font-weight:bold;margin-bottom:10px;cursor:pointer}
+.green{background:#00e676;color:#000;padding:12px;border-radius:10px;text-align:center;font-weight:bold;margin-bottom:10px}
 .card{border:2px solid #00e676;border-radius:12px;padding:12px;margin-bottom:10px;background:#1e1e1e}
 .sell{border-color:#ff5252}
-.exp{font-weight:bold;color:#ffeb00;font-size:16px}
-.entry{font-size:13px;color:#aaa}
+.exp{font-weight:bold;color:#ffeb00}
 .debug{background:#222;padding:8px;border-radius:8px;font-size:11px;color:#aaa;margin-top:10px}
 </style></head><body>
 <div class="top" id="clock">00:00:00</div>
-<div class="badge">🟢 ANALYZER V73 PINBAR ONLY - {{pending|length}} attivi - {{history|length}} totali oggi - Cooldown:{{cooldown|length}} - 21 PAIRS</div>
-<div class="green" onclick="enableSound()">✅ SUONO ON - Clicca qui per attivare suono automatico</div>
-
+<div class="badge">🟢 V74 PINBAR LOOSE 5MIN - {{pending|length}} attivi - {{history|length}} oggi - Cooldown:{{cooldown|length}} - 21 PAIRS</div>
+<div class="green" onclick="let a=new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');a.play()">✅ SUONO ON - TEST</div>
 {% for h in pending[::-1] %}
 <div class="card {{'sell' if h.signal=='SELL' else ''}}">
-🎯 {{h.symbol}} {{h.signal}} PINBAR<br>
-<span class="exp">⏰ SCADENZA: {{h.scadenza}}</span> - {{h.time_str}} RSI{{h.rsi}}<br>
-<span class="entry">Entry {{h.entry}} | Coda {{h.tail}}x | Ora entra per {{h.scadenza}}</span>
+🎯 {{h.symbol}} {{h.signal}} PINBAR <span class="exp">⏰ {{h.scadenza}}</span> {{h.time_str}} RSI{{h.rsi}}<br>
+<span style="font-size:13px;color:#aaa">Entry {{h.entry}} | Coda {{h.tail}}x</span>
 </div>
 {% endfor %}
-
 <div style="background:#1a1a1a;padding:10px;border-radius:10px;margin-top:15px">
-<b>📊 STORICO SEGNALI - CON SCADENZA</b><br>
-{% if history|length==0 %}In attesa di pinbar pulita...{% endif %}
+<b>📊 STORICO - CON SCADENZA</b><br>
+{% if history|length==0 %}In attesa...{% endif %}
 {% for h in history[::-1][:30] %}
-{{h.time_str}} {{h.symbol}} <span style="color:{{'red' if h.signal=='SELL' else '#00e676'}}">{{h.signal}} PINBAR <span style="color:#ffeb00">⏰{{h.scadenza}}</span> RSI{{h.rsi}}</span><br>
+{{h.time_str}} {{h.symbol}} <span style="color:{{'red' if h.signal=='SELL' else '#00e676'}}">{{h.signal}} PINBAR ⏰{{h.scadenza}} RSI{{h.rsi}} coda{{h.tail}}x</span><br>
 {% endfor %}
 </div>
-
-<div class="debug">DEBUG: {{last_debug}}<br>Ora: {{now}} | Tot segnali: {{history|length}}</div>
-<audio id="alertSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
-
-<script>
-let soundEnabled = false;
-let lastCount = {{history|length}};
-function upd(){document.getElementById('clock').innerText=new Date().toLocaleTimeString('it-IT')}
-setInterval(upd,1000);upd();
-
-function enableSound(){
-    soundEnabled = true;
-    document.getElementById('alertSound').play().then(()=>{}).catch(()=>{});
-    alert('🔔 Suono attivato! Ora suona ad ogni nuovo segnale');
-}
-function checkNew(){
-    let current = {{history|length}};
-    if(current > lastCount && soundEnabled){
-        document.getElementById('alertSound').play();
-        if(navigator.vibrate) navigator.vibrate([300,100,300]);
-        lastCount = current;
-    }
-}
-setInterval(()=>{location.reload()},30000);
-setInterval(checkNew,2000);
-</script>
+<div class="debug">DEBUG: {{last_debug}}<br>Ora: {{now}}</div>
+<script>function upd(){document.getElementById('clock').innerText=new Date().toLocaleTimeString('it-IT')}setInterval(upd,1000);upd();setTimeout(()=>location.reload(),30000);</script>
 </body></html>
 """
 
@@ -96,53 +66,67 @@ def rsi(s,p=14):
 def scan():
     global pending, history, last_debug
     pending=[p for p in pending if time.time()-p['time']<600]
-    count_this_scan=0
+    found_pinbar=0; checked=0
     for symbol in PAIRS:
-        if count_this_scan>=3: break
+        if len([p for p in pending if time.time()-p['time']<600])>=3: break
         clean=symbol.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean] < 1200: continue
+        if clean in cooldown and time.time()-cooldown[clean] < 900: continue
         if any(p['symbol']==clean for p in pending): continue
         try:
             df=yf.Ticker(symbol, session=_YF_SESSION).history(period="2d", interval="5m")
             df=fix_df(df)
+            checked+=1
             if len(df)<100: continue
-            df['e20']=df['Close'].ewm(span=20).mean(); df['e50']=df['Close'].ewm(span=50).mean(); df['e200']=df['Close'].ewm(span=200).mean()
+            df['e20']=df['Close'].ewm(span=20).mean(); df['e50']=df['Close'].ewm(span=50).mean()
             df['rsi']=rsi(df['Close'])
             last=df.iloc[-1]
             o=float(last['Open']); h=float(last['High']); l=float(last['Low']); c=float(last['Close'])
-            price=c; rsi_v=float(last['rsi']); e20=float(last['e20']); e50=float(last['e50']); e200=float(last['e200'])
+            price=c; rsi_v=float(last['rsi']); e20=float(last['e20']); e50=float(last['e50'])
             is_green=c>o; is_red=not is_green; body=abs(c-o); rng=h-l
             if rng==0 or body==0: continue
             upper=h-max(o,c); lower=min(o,c)-l
-            pin_bull = lower > body*2.5 and body < rng*0.35 and upper < body*0.6 and is_green
-            pin_bear = upper > body*2.5 and body < rng*0.35 and lower < body*0.6 and is_red
+
+            # LOOSE MA PULITA - POCO STRETTA COME HAI CHIESTO
+            pin_bull = lower > body*2.0 and body < rng*0.45 and is_green
+            pin_bear = upper > body*2.0 and body < rng*0.45 and is_red
+            if pin_bull or pin_bear: found_pinbar+=1
+
             if not (pin_bull or pin_bear):
-                last_debug=f"{clean} no pinbar"
+                last_debug=f"Scans {checked}/21 pinbar trovate oggi {found_pinbar} - {clean} no pinbar"
                 continue
+
             tail_ratio = lower/body if pin_bull else upper/body
             scadenza = "5 MIN"
-            if pin_bull and price>e200 and e20>e50 and 30<=rsi_v<=55 and (abs(price-e20)/price < 0.005 or rsi_v<42):
+
+            # BUY LOOSE - basta e20>e50 e rsi largo
+            if pin_bull and e20>e50 and 25<=rsi_v<=60:
                 time_str=datetime.now().strftime("%d/%m %H:%M")
                 item={"symbol":clean,"signal":"BUY","entry":f"{price:.5f}","time":time.time(),"time_str":time_str,"rsi":int(rsi_v),"tail":f"{tail_ratio:.1f}","scadenza":scadenza}
                 pending.append(item); history.append(item); cooldown[clean]=time.time()
-                send(f"🎯 PINBAR PULITA BUY {clean}\n⏰ SCADENZA: {scadenza}\nRSI{int(rsi_v)} coda {tail_ratio:.1f}x\nEntry {price:.5f}\nEntra ORA per 5 MIN!")
-                count_this_scan+=1
-            elif pin_bear and price<e200 and e20<e50 and 45<=rsi_v<=70 and (abs(price-e20)/price < 0.005 or rsi_v>58):
+                send(f"🎯 PINBAR BUY {clean} ⏰ {scadenza} RSI{int(rsi_v)} coda {tail_ratio:.1f}x\nEntry {price:.5f}")
+                last_debug=f"SEGNALE BUY {clean} coda {tail_ratio:.1f}x"
+                continue
+            if pin_bear and e20<e50 and 40<=rsi_v<=75:
                 time_str=datetime.now().strftime("%d/%m %H:%M")
                 item={"symbol":clean,"signal":"SELL","entry":f"{price:.5f}","time":time.time(),"time_str":time_str,"rsi":int(rsi_v),"tail":f"{tail_ratio:.1f}","scadenza":scadenza}
                 pending.append(item); history.append(item); cooldown[clean]=time.time()
-                send(f"🎯 PINBAR PULITA SELL {clean}\n⏰ SCADENZA: {scadenza}\nRSI{int(rsi_v)} coda {tail_ratio:.1f}x\nEntry {price:.5f}\nEntra ORA per 5 MIN!")
-                count_this_scan+=1
+                send(f"🎯 PINBAR SELL {clean} ⏰ {scadenza} RSI{int(rsi_v)} coda {tail_ratio:.1f}x\nEntry {price:.5f}")
+                last_debug=f"SEGNALE SELL {clean} coda {tail_ratio:.1f}x"
+
         except Exception as e:
             last_debug=f"ERR {clean}: {e}"
             continue
+    if found_pinbar==0:
+        last_debug=f"Nessuna pinbar su {checked} coppie - mercato piatto {datetime.now().strftime('%H:%M')}"
+    else:
+        last_debug=f"Trovate {found_pinbar} pinbar ma filtrate da RSI/trend - {last_debug}"
 
 def loop():
     time.sleep(5)
-    if TOKEN and CHAT_ID: send("🚀 ANALYZER V73 PINBAR 5MIN AVVIATO\n✅ Scadenza indicata ovunque\n✅ Storico con scadenza\n✅ Suono ON")
+    if TOKEN and CHAT_ID: send("🚀 V74 LOOSE 5MIN AVVIATO - Filtro poco stretto, ora arrivano segnali")
     while True:
         try: scan()
-        except Exception as e: print(f"LOOP ERR {e}")
+        except Exception as e: print(e)
         time.sleep(60)
 
 threading.Thread(target=loop, daemon=True).start()
