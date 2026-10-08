@@ -81,16 +81,16 @@ def scan():
             # L1 TREND - UGUALE
             if not signal:
                 if price>e200 and e20>e50 and slope_e20>=0 and 28<=rsi_v<=47 and stoch_k<35 and is_green:
-                    if tocco_e20 or 25<=rsi_v<=33:
+                    if tocco_e20 or 25<=rsi_v<=38:
                         signal="BUY"; lavoro="L1 TREND"; scadenza="30 MIN"
                 if price<e200 and e20<e50 and slope_e20<=0 and 53<=rsi_v<=72 and stoch_k>65 and is_red:
-                    if tocco_e20 or 68<=rsi_v<=76:
+                    if tocco_e20 or 65<=rsi_v<=76:
                         signal="SELL"; lavoro="L1 TREND"; scadenza="15 MIN"
 
             # L2 PINBAR - MODIFICA SOLO QUI - PELO ALLA VOLTA
             if not signal and total_range>0 and body>0:
-                pin_bull = lower > body*2.4 and body < total_range*0.38 and upper < body*0.8 and is_green
-                pin_bear = upper > body*2.4 and body < total_range*0.38 and lower < body*0.8 and is_red
+                pin_bull = lower > body*2.4 and body < total_range*0.38 and upper < body*0.7 and is_green
+                pin_bear = upper > body*2.4 and body < total_range*0.38 and lower < body*0.7 and is_red
                 if pin_bull and price>e200 and e20>e50 and 30<=rsi_v<=55:
                     signal="BUY"; lavoro="L2 PINBAR"; scadenza="30 MIN"
                 if pin_bear and price<e200 and e20<e50 and 45<=rsi_v<=70:
@@ -105,19 +105,6 @@ def scan():
         except Exception as e:
             print(f"ERR {clean}: {e}")
             continue
-
-def check_results():
-    for p in pending[:]:
-        if time.time()-p['time'] < 900: continue
-        try:
-            df=yf.Ticker(p['symbol']+"=X", session=_YF_SESSION).history(period="1d", interval="1m")
-            df=fix_df(df)
-            if len(df)==0: continue
-            curr=float(df['Close'].iloc[-1])
-            win=(p['signal']=="BUY" and curr>p['entry']) or (p['signal']=="SELL" and curr<p['entry'])
-            send(f"{'WIN ✅' if win else 'LOSS ❌'} {p['symbol']} {p['signal']} {((curr-p['entry'])/p['entry']*100):+.3f}%")
-            pending.remove(p)
-        except: pass
 
 def loop():
     time.sleep(3)
