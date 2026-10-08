@@ -10,10 +10,8 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 
 app = Flask(__name__)
-
 @app.route('/')
-def home():
-    return f"V61.5 SBLOCCATO L1+L2 - TOKEN:{bool(TOKEN)} CHAT:{bool(CHAT_ID)} - Pending:{len(pending)} - Cooldown:{len(cooldown)} - {len(PAIRS)} PAIRS"
+def home(): return f"V61.6 SOLO PINBAR FIX - TOKEN:{bool(TOKEN)} CHAT:{bool(CHAT_ID)} - Pending:{len(pending)} - Cooldown:{len(cooldown)} - {len(PAIRS)} PAIRS"
 
 pending=[]; cooldown={}
 _YF_SESSION = cffi_requests.Session(impersonate="chrome")
@@ -24,19 +22,21 @@ def send(msg):
     try:
         r=requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=15)
         print(f"TG RESP: {r.status_code}")
-    except Exception as e:
-        print(f"SEND ERR: {e}")
+    except Exception as e: print(f"SEND ERR: {e}")
 
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
     return df
+
 def rsi(s,p=14):
     d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
     return 100-(100/(1+g/l))
+
 def atr(df,p=14):
     hl=df['High']-df['Low']; hc=abs(df['High']-df['Close'].shift()); lc=abs(df['Low']-df['Close'].shift())
     tr=pd.concat([hl,hc,lc],axis=1).max(axis=1)
     return tr.rolling(p).mean()
+
 def stochastic(df,k=14,d=3):
     lo=df['Low'].rolling(k).min(); hi=df['High'].rolling(k).max()
     k_perc=100*((df['Close']-lo)/(hi-lo))
@@ -44,12 +44,12 @@ def stochastic(df,k=14,d=3):
 
 def scan():
     global pending
-    pending=[p for p in pending if time.time()-p['time']<1800] # 30min invece di 60min
+    pending=[p for p in pending if time.time()-p['time']<1800]
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=3: break # 3 segnali per giro invece di 2
+        if count_this_scan>=3: break
         clean=symbol.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean] < 1800: continue # 1800 invece di 3600
+        if clean in cooldown and time.time()-cooldown[clean] < 1800: continue
         if any(p['symbol']==clean for p in pending): continue
         try:
             tk=yf.Ticker(symbol, session=_YF_SESSION)
@@ -66,46 +66,38 @@ def scan():
             price=c; rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
             e20=float(last['e20']); e50=float(last['e50']); e200=float(last['e200'])
             is_green=c>o; is_red=not is_green
-
             body=abs(c-o); total_range=h-l
             upper=h-max(o,c); lower=min(o,c)-l
 
-            # FILTRO ATR ALLARGATO
             if last['atr'] < last['atr_ma50']*0.55: continue
             if last['atr'] > last['atr_ma50']*1.80: continue
-
-            tocco_e20=abs(price-e20)/price < 0.0030 # da 0.0030 a 0.0040
+            tocco_e20=abs(price-e20)/price < 0.0030
             dist_e200=abs(price-e200)/price
-            if dist_e200 < 0.0005: continue # da 0.0008 a 0.0005
-
+            if dist_e200 < 0.0005: continue
             slope_e20 = float(df['e20'].iloc[-1] - df['e20'].iloc[-4])
 
             signal=None; lavoro=""; scadenza=""
 
-            # ========== LAVORO 1 - TREND TUO SBLOCCATO ==========
-            # Prima avevi 30-44 e 56-70 con stoch 28/72 - ora 28-47 e 53-72 con stoch 35/65
+            # L1 TREND - UGUALE
             if not signal:
                 if price>e200 and e20>e50 and slope_e20>=0 and 28<=rsi_v<=47 and stoch_k<35 and is_green:
-                    if tocco_e20 or 28<=rsi_v<=35: # se RSI basso entra anche senza tocco perfetto
+                    if tocco_e20 or 28<=rsi_v<=35:
                         signal="BUY"; lavoro="L1 TREND"; scadenza="30 MIN"
                 if price<e200 and e20<e50 and slope_e20<=0 and 53<=rsi_v<=72 and stoch_k>65 and is_red:
                     if tocco_e20 or 65<=rsi_v<=72:
                         signal="SELL"; lavoro="L1 TREND"; scadenza="15 MIN"
 
-            # ========== LAVORO 2 - PINBAR PULITA SEPARATO ==========
+            # L2 PINBAR - MODIFICA SOLO QUI - PELO ALLA VOLTA
             if not signal and total_range>0 and body>0:
-                # Pinbar pulita: coda lunga 2.2x body, body <40% range
-                pin_bull = lower > body*2.2 and body < total_range*0.40 and upper < body*0.9 and is_green
-                pin_bear = upper > body*2.2 and body < total_range*0.40 and lower < body*0.9 and is_red
+                pin_bull = lower > body*2.4 and body < total_range*0.38 and upper < body*0.7 and is_green
+                pin_bear = upper > body*2.4 and body < total_range*0.38 and lower < body*0.7 and is_red
                 if pin_bull and price>e200 and e20>e50 and 30<=rsi_v<=55:
                     signal="BUY"; lavoro="L2 PINBAR"; scadenza="30 MIN"
                 if pin_bear and price<e200 and e20<e50 and 45<=rsi_v<=70:
                     signal="SELL"; lavoro="L2 PINBAR"; scadenza="15 MIN"
 
             if signal:
-                # Coppie lente sempre 30 MIN
-                if clean in ["EURGBP","EURJPY","GBPCHF","EURAUD"]:
-                    scadenza="30 MIN"
+                if clean in ["EURGBP","EURJPY","GBPCHF","EURAUD"]: scadenza="30 MIN"
                 send(f"🎯 {lavoro} {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} ⏰ {scadenza}\nEntry {price:.5f}")
                 pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
                 cooldown[clean]=time.time()
@@ -116,7 +108,7 @@ def scan():
 
 def check_results():
     for p in pending[:]:
-        if time.time()-p['time'] < 900: continue # check dopo 15min invece di 3min
+        if time.time()-p['time'] < 900: continue
         try:
             df=yf.Ticker(p['symbol']+"=X", session=_YF_SESSION).history(period="1d", interval="1m")
             df=fix_df(df)
@@ -129,19 +121,12 @@ def check_results():
 
 def loop():
     time.sleep(3)
-    if not TOKEN or not CHAT_ID:
-        print("MANCA TOKEN/CHAT_ID!")
-    else:
-        send(f"🚀 V61.5 SBLOCCATO L1+L2 AVVIATO - {len(PAIRS)} coppie\nL1 TREND allargato + L2 PINBAR pulita\nOra dovresti ricevere 4-8 segnali al giorno")
+    if not TOKEN or not CHAT_ID: print("MANCA TOKEN/CHAT_ID!")
+    else: send(f"🚀 V61.6 SOLO PINBAR FIX AVVIATO - {len(PAIRS)} coppie\nUnica modifica: coda 2.2->2.4 body 40%->38% opposta 0.9->0.7")
     while True:
-        try:
-            scan()
-            check_results()
-        except Exception as e:
-            print(f"LOOP ERR {e}")
+        try: scan(); check_results()
+        except Exception as e: print(f"LOOP ERR {e}")
         time.sleep(60)
 
 threading.Thread(target=loop, daemon=True).start()
-
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+if __name__=="__main__": app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
