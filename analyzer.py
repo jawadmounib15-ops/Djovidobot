@@ -10,7 +10,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 
 app = Flask(__name__)
-pending=[]; cooldown={}; history=[]; last_debug="V75.37 WIDE pronto"; scan_count=0; pair_index=0; last_scan=0
+pending=[]; cooldown={}; history=[]; last_debug="V75.38 ULTRA WIDE pronto"; scan_count=0; pair_index=0; last_scan=0
 
 HTML = """
 <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -22,25 +22,25 @@ body{background:#0e0e0e;color:#fff;font-family:Arial;margin:0;padding:10px}
 .card{border:2px solid #00e676;border-radius:10px;padding:10px;margin-bottom:8px;background:#1e1e1e;font-size:13px}
 .sell{border-color:#ff5252}
 .exp{color:#ffeb00;font-weight:bold}
-.debug{background:#222;padding:7px;border-radius:6px;font-size:10px;color:#aaa;margin-top:8px}
+.debug{background:#222;padding:7px;border-radius:6px;font-size:10px;color:#aaa;margin-top:8px;white-space:pre-wrap}
 </style></head><body>
 <div class="top" id="clock">00:00:00</div>
-<div class="badge">🟢 V75.37 WIDE 1MIN->5MIN - {{pending|length}} attivi - {{history|length}} oggi - Scan:{{scan_count}} - Idx:{{pair_idx}}/21</div>
-<div class="green" onclick="let a=new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');a.play()">✅ SUONO ON - WIDE 1.8x 55% 0.9 - ALLARGATO</div>
+<div class="badge">🟢 V75.38 ULTRA WIDE 1MIN->5MIN - {{pending|length}} attivi - {{history|length}} oggi - Scan:{{scan_count}} - Idx:{{pair_idx}}/21</div>
+<div class="green" onclick="let a=new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');a.play()">✅ SUONO ON - ULTRA WIDE 1.5x 60% 1.0 NO EMA</div>
 {% for h in pending[::-1] %}
 <div class="card {{'sell' if h.signal=='SELL' else ''}}">
 🎯 {{h.symbol}} {{h.signal}} <span class="exp">⏰ {{h.scadenza}}</span> {{h.time_str}} RSI{{h.rsi}} coda{{h.tail}}x body{{h.body}}%<br>
-<span style="font-size:10px">Entry {{h.entry}}</span>
+<span style="font-size:10px">{{h.info}}</span>
 </div>
 {% endfor %}
 <div style="background:#1a1a1a;padding:8px;border-radius:8px;margin-top:10px">
 <b>📊 STORICO 1MIN -> 5MIN</b><br>
 {% for h in history[::-1][:40] %}
-{{h.time_str}} {{h.symbol}} <span style="color:{{'red' if h.signal=='SELL' else '#00e676'}}">{{h.signal}} ⏰{{h.scadenza}} RSI{{h.rsi}} coda{{h.tail}}x body{{h.body}}%</span><br>
+{{h.time_str}} {{h.symbol}} {{h.signal}} ⏰{{h.scadenza}} RSI{{h.rsi}} coda{{h.tail}}x<br>
 {% endfor %}
 </div>
-<div class="debug">DEBUG: {{last_debug}}<br>{{now}} | WIDE 1.8x 55% 0.9 | 1MIN->5MIN</div>
-<script>function upd(){document.getElementById('clock').innerText=new Date().toLocaleTimeString('it-IT')}setInterval(upd,1000);upd();setTimeout(()=>location.reload(),15000);</script>
+<div class="debug">DEBUG: {{last_debug}}<br>{{now}}</div>
+<script>function upd(){document.getElementById('clock').innerText=new Date().toLocaleTimeString('it-IT')}setInterval(upd,1000);upd();setTimeout(()=>location.reload(),12000);</script>
 </body></html>
 """
 
@@ -57,17 +57,18 @@ def rsi(s,p=14):
 
 def do_scan():
     global pending, history, last_debug, scan_count, pair_index, last_scan
-    if time.time()-last_scan<20: return
+    if time.time()-last_scan<15: return
     last_scan=time.time(); scan_count+=1
     pending=[p for p in pending if time.time()-p['time']<320]
     batch=PAIRS[pair_index:pair_index+7]
     if len(batch)<7: batch+=PAIRS[:7-len(batch)]
     pair_index=(pair_index+7)%21
-    checked=0; found=0; debug_sym=""
+    checked=0; found=0; best=""
+    max_tail=0
     for symbol in batch:
-        if len(pending)>=3: break
+        if len(pending)>=4: break
         clean=symbol.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean]<600: continue
+        if clean in cooldown and time.time()-cooldown[clean]<400: continue
         if any(p['symbol']==clean for p in pending): continue
         try:
             df=yf.Ticker(symbol).history(period="1d", interval="1m", auto_adjust=False)
@@ -75,44 +76,50 @@ def do_scan():
             checked+=1
             if len(df)<50: continue
             df['e20']=df['Close'].ewm(span=20).mean()
-            df['e50']=df['Close'].ewm(span=50).mean()
             df['rsi']=rsi(df['Close'])
             last=df.iloc[-1]
             o=float(last['Open']); h=float(last['High']); l=float(last['Low']); c=float(last['Close'])
             rsi_v=float(last['rsi']) if not pd.isna(last['rsi']) else 50
-            e20=float(last['e20']); e50=float(last['e50'])
             body=abs(c-o); rng=h-l
-            if rng==0 or body==0: continue
+            if rng==0 or body==0:
+                best=f"{clean} body0 rng{rng:.5f}"
+                continue
             upper=h-max(o,c); lower=min(o,c)-l
             is_green=c>o; is_red=not is_green
             body_perc=body/rng*100
+            tail_up=upper/body if body>0 else 0
+            tail_down=lower/body if body>0 else 0
+            cur_max=max(tail_up,tail_down)
+            if cur_max>max_tail:
+                max_tail=cur_max
+                best=f"{clean} tail{cur_max:.1f} body{body_perc:.0f}% {'G' if is_green else 'R'} RSI{int(rsi_v)}"
 
-            # V75.37 WIDE - ALLARGATO PER VEDERE SEGNALI
-            pin_bull = lower > body*1.8 and body < rng*0.55 and upper < body*0.90 and is_green
-            pin_bear = upper > body*1.8 and body < rng*0.55 and lower < body*0.90 and is_red
+            # ULTRA WIDE 1.5x 60% 1.0 - NO EMA
+            pin_bull = lower > body*1.5 and body < rng*0.60 and upper < body*1.0 and is_green
+            pin_bear = upper > body*1.5 and body < rng*0.60 and lower < body*1.0 and is_red
 
             if pin_bull or pin_bear:
                 found+=1
-                debug_sym=f"{clean} tail {lower/body if pin_bull else upper/body:.1f} body{body_perc:.0f}%"
 
             tail=lower/body if pin_bull else upper/body if pin_bear else 0
             t=datetime.now().strftime("%d/%m %H:%M")
 
-            # RSI LARGO PER 1 MIN
-            if pin_bull and e20>e50 and 20<=rsi_v<=65:
-                item={"symbol":clean,"signal":"BUY","entry":f"{c:.5f}","time":time.time(),"time_str":t,"rsi":int(rsi_v),"tail":f"{tail:.1f}","scadenza":"5 MIN","body":f"{body_perc:.0f}"}
+            # SENZA EMA - SOLO RSI LARGO
+            if pin_bull and 15<=rsi_v<=70:
+                item={"symbol":clean,"signal":"BUY","entry":f"{c:.5f}","time":time.time(),"time_str":t,"rsi":int(rsi_v),"tail":f"{tail:.1f}","scadenza":"5 MIN","body":f"{body_perc:.0f}","info":f"1m->5m ULTRA WIDE"}
                 pending.append(item); history.append(item); cooldown[clean]=time.time()
-                send(f"🎯 WIDE BUY {clean} ⏰ 5 MIN RSI{int(rsi_v)} coda {tail:.1f}x")
+                send(f"🎯 1m BUY {clean} ⏰ 5 MIN RSI{int(rsi_v)} coda{tail:.1f}x")
 
-            if pin_bear and e20<e50 and 35<=rsi_v<=80:
-                item={"symbol":clean,"signal":"SELL","entry":f"{c:.5f}","time":time.time(),"time_str":t,"rsi":int(rsi_v),"tail":f"{tail:.1f}","scadenza":"5 MIN","body":f"{body_perc:.0f}"}
+            if pin_bear and 30<=rsi_v<=85:
+                item={"symbol":clean,"signal":"SELL","entry":f"{c:.5f}","time":time.time(),"time_str":t,"rsi":int(rsi_v),"tail":f"{tail:.1f}","scadenza":"5 MIN","body":f"{body_perc:.0f}","info":f"1m->5m ULTRA WIDE"}
                 pending.append(item); history.append(item); cooldown[clean]=time.time()
-                send(f"🎯 WIDE SELL {clean} ⏰ 5 MIN RSI{int(rsi_v)} coda {tail:.1f}x")
+                send(f"🎯 1m SELL {clean} ⏰ 5 MIN RSI{int(rsi_v)} coda{tail:.1f}x")
 
         except Exception as e:
+            best=f"err {clean} {str(e)[:20]}"
             continue
 
-    last_debug=f"Scan {scan_count} OK 1m->5m viste {checked} pinbar {found} attivi {len(pending)} {debug_sym} WIDE 1.8x55%"
+    last_debug=f"Scan {scan_count} OK 1m->5m viste {checked} pinbar {found} attivi {len(pending)} BEST:{best} ULTRA 1.5x60%"
 
 @app.route('/')
 def home():
