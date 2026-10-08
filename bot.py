@@ -81,16 +81,16 @@ def scan():
             # L1 TREND - UGUALE
             if not signal:
                 if price>e200 and e20>e50 and slope_e20>=0 and 28<=rsi_v<=47 and stoch_k<35 and is_green:
-                    if tocco_e20 or 28<=rsi_v<=35:
+                    if tocco_e20 or 25<=rsi_v<=33:
                         signal="BUY"; lavoro="L1 TREND"; scadenza="30 MIN"
                 if price<e200 and e20<e50 and slope_e20<=0 and 53<=rsi_v<=72 and stoch_k>65 and is_red:
-                    if tocco_e20 or 65<=rsi_v<=72:
+                    if tocco_e20 or 68<=rsi_v<=76:
                         signal="SELL"; lavoro="L1 TREND"; scadenza="15 MIN"
 
             # L2 PINBAR - MODIFICA SOLO QUI - PELO ALLA VOLTA
             if not signal and total_range>0 and body>0:
-                pin_bull = lower > body*2.4 and body < total_range*0.38 and upper < body*0.7 and is_green
-                pin_bear = upper > body*2.4 and body < total_range*0.38 and lower < body*0.7 and is_red
+                pin_bull = lower > body*2.4 and body < total_range*0.38 and upper < body*0.8 and is_green
+                pin_bear = upper > body*2.4 and body < total_range*0.38 and lower < body*0.8 and is_red
                 if pin_bull and price>e200 and e20>e50 and 30<=rsi_v<=55:
                     signal="BUY"; lavoro="L2 PINBAR"; scadenza="30 MIN"
                 if pin_bear and price<e200 and e20<e50 and 45<=rsi_v<=70:
