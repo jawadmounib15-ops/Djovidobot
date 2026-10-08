@@ -72,9 +72,9 @@ def scan():
 
             # FILTRO ATR ALLARGATO
             if last['atr'] < last['atr_ma50']*0.55: continue
-            if last['atr'] > last['atr_ma50']*2.10: continue
+            if last['atr'] > last['atr_ma50']*1.80: continue
 
-            tocco_e20=abs(price-e20)/price < 0.0040 # da 0.0030 a 0.0040
+            tocco_e20=abs(price-e20)/price < 0.0030 # da 0.0030 a 0.0040
             dist_e200=abs(price-e200)/price
             if dist_e200 < 0.0005: continue # da 0.0008 a 0.0005
 
