@@ -10,7 +10,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 
 app = Flask(__name__)
-pending=[]; cooldown={}; history=[]; last_debug="V75.39 FIX DOJI pronto"; scan_count=0; pair_index=0; last_scan=0
+pending=[]; cooldown={}; history=[]; last_debug="V75.40 POCO POCO pronto"; scan_count=0; pair_index=0; last_scan=0
 
 HTML = """
 <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -25,18 +25,18 @@ body{background:#0e0e0e;color:#fff;font-family:Arial;margin:0;padding:10px}
 .debug{background:#222;padding:7px;border-radius:6px;font-size:10px;color:#aaa;margin-top:8px;white-space:pre-wrap}
 </style></head><body>
 <div class="top" id="clock">00:00:00</div>
-<div class="badge">🟢 V75.39 FIX DOJI 1MIN->5MIN - {{pending|length}} attivi - {{history|length}} oggi - Scan:{{scan_count}} - Idx:{{pair_idx}}/21</div>
-<div class="green" onclick="let a=new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');a.play()">✅ SUONO ON - FIX DOJI 1.2x 65% 1.2</div>
+<div class="badge">🟢 V75.40 POCO POCO 1MIN->5MIN - {{pending|length}} attivi - {{history|length}} oggi - Scan:{{scan_count}} - Idx:{{pair_idx}}/21</div>
+<div class="green" onclick="let a=new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg');a.play()">✅ SUONO ON - 1.5x 50% 0.8 - POCO POCO</div>
 {% for h in pending[::-1] %}
 <div class="card {{'sell' if h.signal=='SELL' else ''}}">
-🎯 {{h.symbol}} {{h.signal}} <span class="exp">⏰ {{h.scadenza}}</span> {{h.time_str}} RSI{{h.rsi}} coda{{h.tail}}x<br>
+🎯 {{h.symbol}} {{h.signal}} <span class="exp">⏰ {{h.scadenza}}</span> {{h.time_str}} RSI{{h.rsi}} coda{{h.tail}}x body{{h.body}}%<br>
 <span style="font-size:10px">{{h.info}}</span>
 </div>
 {% endfor %}
 <div style="background:#1a1a1a;padding:8px;border-radius:8px;margin-top:10px">
 <b>📊 STORICO 1MIN -> 5MIN</b><br>
 {% for h in history[::-1][:40] %}
-{{h.time_str}} {{h.symbol}} {{h.signal}} ⏰{{h.scadenza}} RSI{{h.rsi}} coda{{h.tail}}x<br>
+{{h.time_str}} {{h.symbol}} {{h.signal}} ⏰{{h.scadenza}} RSI{{h.rsi}} coda{{h.tail}}x body{{h.body}}%<br>
 {% endfor %}
 </div>
 <div class="debug">DEBUG: {{last_debug}}<br>{{now}}</div>
@@ -65,9 +65,9 @@ def do_scan():
     pair_index=(pair_index+7)%21
     checked=0; found=0; best=""; max_tail=0
     for symbol in batch:
-        if len(pending)>=4: break
+        if len(pending)>=3: break
         clean=symbol.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean]<300: continue
+        if clean in cooldown and time.time()-cooldown[clean]<400: continue
         if any(p['symbol']==clean for p in pending): continue
         try:
             df=yf.Ticker(symbol).history(period="1d", interval="1m", auto_adjust=False)
@@ -79,12 +79,8 @@ def do_scan():
             o=float(last['Open']); h=float(last['High']); l=float(last['Low']); c=float(last['Close'])
             rsi_v=float(last['rsi']) if not pd.isna(last['rsi']) else 50
             body=abs(c-o); rng=h-l
-            if rng==0 or rng<0.00001:
-                best=f"{clean} rng0"
-                continue
-            # FIX DOJI - se body 0 lo trattiamo come 10% del range
-            if body==0 or body<rng*0.05:
-                body=rng*0.08
+            if rng==0 or rng<0.00001: continue
+            if body==0 or body<rng*0.05: body=rng*0.07
             upper=h-max(o,c); lower=min(o,c)-l
             is_green=c>=o
             body_perc=body/rng*100
@@ -93,35 +89,29 @@ def do_scan():
             cur_max=max(tail_up,tail_down)
             if cur_max>max_tail:
                 max_tail=cur_max
-                best=f"{clean} tail{cur_max:.1f} body{body_perc:.0f}% {'G' if is_green else 'R'} RSI{int(rsi_v)} rng{rng:.5f}"
+                best=f"{clean} tail{cur_max:.1f} body{body_perc:.0f}% {'G' if is_green else 'R'} RSI{int(rsi_v)}"
 
-            # ULTRA WIDE DOJI FIX - 1.2x super largo
-            pin_bull = lower > body*1.2 and body < rng*0.65 and upper < body*1.2
-            pin_bear = upper > body*1.2 and body < rng*0.65 and lower < body*1.2
+            # STRINGO POCO POCO: da 1.2x -> 1.5x, da 65% -> 50%, da 1.2 -> 0.8
+            pin_bull = lower > body*1.5 and body < rng*0.50 and upper < body*0.80 and is_green
+            pin_bear = upper > body*1.5 and body < rng*0.50 and lower < body*0.80 and not is_green
 
-            if pin_bull or pin_bear:
-                found+=1
-
+            if pin_bull or pin_bear: found+=1
             tail=tail_down if pin_bull else tail_up
             t=datetime.now().strftime("%d/%m %H:%M")
 
-            if pin_bull and 10<=rsi_v<=75:
-                side="BUY" if is_green else "BUY-doji"
-                item={"symbol":clean,"signal":"BUY","entry":f"{c:.5f}","time":time.time(),"time_str":t,"rsi":int(rsi_v),"tail":f"{tail:.1f}","scadenza":"5 MIN","body":f"{body_perc:.0f}","info":f"doji-fix tail{tail:.1f}"}
+            if pin_bull and 15<=rsi_v<=70:
+                item={"symbol":clean,"signal":"BUY","entry":f"{c:.5f}","time":time.time(),"time_str":t,"rsi":int(rsi_v),"tail":f"{tail:.1f}","scadenza":"5 MIN","body":f"{body_perc:.0f}","info":f"1.5x poco-poco"}
                 pending.append(item); history.append(item); cooldown[clean]=time.time()
-                send(f"🎯 1m {side} {clean} ⏰ 5 MIN RSI{int(rsi_v)} coda{tail:.1f}x")
+                send(f"🎯 1.5x BUY {clean} ⏰ 5 MIN RSI{int(rsi_v)} coda{tail:.1f}x")
 
-            if pin_bear and 25<=rsi_v<=90:
-                side="SELL" if not is_green else "SELL-doji"
-                item={"symbol":clean,"signal":"SELL","entry":f"{c:.5f}","time":time.time(),"time_str":t,"rsi":int(rsi_v),"tail":f"{tail:.1f}","scadenza":"5 MIN","body":f"{body_perc:.0f}","info":f"doji-fix tail{tail:.1f}"}
+            if pin_bear and 30<=rsi_v<=85:
+                item={"symbol":clean,"signal":"SELL","entry":f"{c:.5f}","time":time.time(),"time_str":t,"rsi":int(rsi_v),"tail":f"{tail:.1f}","scadenza":"5 MIN","body":f"{body_perc:.0f}","info":f"1.5x poco-poco"}
                 pending.append(item); history.append(item); cooldown[clean]=time.time()
-                send(f"🎯 1m {side} {clean} ⏰ 5 MIN RSI{int(rsi_v)} coda{tail:.1f}x")
+                send(f"🎯 1.5x SELL {clean} ⏰ 5 MIN RSI{int(rsi_v)} coda{tail:.1f}x")
 
-        except Exception as e:
-            best=f"err {clean} {str(e)[:30]}"
-            continue
+        except: continue
 
-    last_debug=f"Scan {scan_count} OK 1m->5m viste {checked} pinbar {found} attivi {len(pending)} BEST:{best} FIX-DOJI 1.2x"
+    last_debug=f"Scan {scan_count} OK 1m->5m viste {checked} pinbar {found} attivi {len(pending)} BEST:{best} POCO-POCO 1.5x50%"
 
 @app.route('/')
 def home():
