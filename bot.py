@@ -89,22 +89,24 @@ def scan():
 
             # L2 PINBAR - MODIFICA SOLO QUI - PELO ALLA VOLTA
             if not signal and total_range>0 and body>0:
-                pin_bull = lower > body*2.4 and body < total_range*0.38 and upper < body*0.7 and is_green
-                pin_bear = upper > body*2.4 and body < total_range*0.38 and lower < body*0.7 and is_red
-                if pin_bull and price>e200 and e20>e50 and 30<=rsi_v<=55:
-                    signal="BUY"; lavoro="L2 PINBAR"; scadenza="30 MIN"
-                if pin_bear and price<e200 and e20<e50 and 45<=rsi_v<=70:
-                    signal="SELL"; lavoro="L2 PINBAR"; scadenza="15 MIN"
+    pin_bull = lower > body*2.6 and body < total_range*0.35 and upper < body*0.6 and is_green
+    pin_bear = upper > body*2.6 and body < total_range*0.35 and lower < body*0.6 and is_red
 
-            if signal:
-                if clean in ["EURGBP","EURJPY","GBPCHF","EURAUD"]: scadenza="30 MIN"
-                send(f"🎯 {lavoro} {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} ⏰ {scadenza}\nEntry {price:.5f}")
-                pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
-                cooldown[clean]=time.time()
-                count_this_scan+=1
-        except Exception as e:
-            print(f"ERR {clean}: {e}")
-            continue
+    if pin_bull and price>e200 and e20>e50 and 30<=rsi_v<=55:
+        signal="BUY"; lavoro="L2 PINBAR"; scadenza="30 MIN"
+    if pin_bear and price<e200 and e20<e50 and 45<=rsi_v<=70:
+        signal="SELL"; lavoro="L2 PINBAR"; scadenza="15 MIN"
+
+    if signal:
+        if clean in ["EURGBP","EURJPY","GBPCHF","EURAUD"]:
+            scadenza="30 MIN"
+        send(f"🎯 {lavoro} {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} ⏰ {scadenza}\nEntry {price:.5f}")
+        pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
+        cooldown[clean]=time.time()
+        count_this_scan+=1
+except Exception as e:
+    print(f"ERR {clean}: {e}")
+    continue
 
 def loop():
     time.sleep(3)
