@@ -60,7 +60,7 @@ class PinBarAnalyzer:
         return [s for s in self.storico if s['status']=="ATTIVO" and now - s['timestamp'] < 200]
     def get_history(self): return self.storico[-30:][::-1]
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJPY=X","EURGBP=X","EURCHF=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","AUDCHF=X","AUDUSD=X","CHFJPY=X","AUDCAD=X"]
 app = Flask(__name__)
 analyzer = PinBarAnalyzer()
 scan_count = 0; pair_index = 0; last_scan = 0; last_debug = "Pronto 21 coppie stretto"
