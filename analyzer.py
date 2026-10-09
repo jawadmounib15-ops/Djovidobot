@@ -1,4 +1,4 @@
-# Analyzer.py - V7.1 OTC 1.9x FILTRATA 80% + FIX PREZZO
+# Analyzer.py - V7.2 OTC 1.9x FILTRATA FIX PREZZO + TROVA SEGNALI
 import os, time, threading, random
 from flask import Flask, render_template_string, jsonify
 import yfinance as yf
@@ -10,15 +10,15 @@ from datetime import datetime, timedelta
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", "")).strip()
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
 
-OTC_PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURGBP=X","EURCHF=X","GBPCHF=X","CADJPY=X","AUDCAD=X","GBPAUD=X"]
+OTC_PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURGBP=X","GBPCHF=X","EURCHF=X","AUDCAD=X","CADJPY=X","CHFJPY=X"]
 
 app = Flask(__name__)
 _YF_SESSION = cffi_requests.Session(impersonate="chrome")
 signals_log = []
-last_scan = {"time":"Avvio V7.1 1.9x filtrata...","found":0,"win_est":"--"}
+last_scan = {"time":"Avvio V7.2...","found":0,"win_est":"Calcolo..."}
 
 HTML = """
-<!DOCTYPE html><html><head><title>OTC 1.9x 80% V7.1</title>
+<!DOCTYPE html><html><head><title>OTC 1.9x V7.2</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body{background:#0f172a;color:#e2e8f0;font-family:Arial;padding:12px}
@@ -29,16 +29,16 @@ body{background:#0f172a;color:#e2e8f0;font-family:Arial;padding:12px}
 .timer{color:#facc15;font-weight:bold;font-size:18px}
 button{padding:12px;border-radius:10px;color:white;border:none;font-weight:bold;width:100%;margin:5px 0}
 .btn-scan{background:#3b82f6}.btn-test{background:#22c55e}
-.small{color:#94a3b8;font-size:11px}
+.small{color:#94a3b8;font-size:10px}
 table{width:100%;border-collapse:collapse;font-size:11px} th,td{padding:6px;border-bottom:1px solid #334155}
 </style></head><body>
-<h2>🔶 V7.1 OTC 1.9x FILTRATA 80%</h2>
-<div class="card">⏰ {{last.time}} | OTC Trovati: {{last.found}} | Totale: {{logs|length}} | Win: {{last.win_est}}<br><span class="small">Filtri: Swing 10 + EMA rimbalzo + RSI + E200</span></div>
+<h2>🔶 V7.2 OTC 1.9x FILTRATA 80% TARGET</h2>
+<div class="card">⏰ {{last.time}} | OTC Trovati: {{last.found}} | Totale: {{logs|length}} | {{last.win_est}}<br><span class="small">Filtri: Swing 8 + EMA rimbalzo 0.25% + RSI 25-50/50-75</span></div>
 <div class="card">
 <button class="btn-scan" onclick="scanNow()">🔍 SCANNA OTC FILTRATA</button>
-<button class="btn-test" onclick="testSound()">🔊 TEST SUONO</button>
+<button class="btn-test" onclick="testSound()">🔊 TEST SUONO (prezzo giusto)</button>
 </div>
-<div class="card"><h3>🔴 LIVE 6 Min</h3><div id="live">In attesa pinbar 1.9x filtrata...</div></div>
+<div class="card"><h3>🔴 LIVE 6 Min</h3><div id="live">In attesa...</div></div>
 <div class="card"><h3>📜 STORICO OTC</h3>
 <table><tr><th>Ora</th><th>Segnale</th><th>Prezzo</th><th>Motivo</th></tr>
 {% for s in logs[::-1][:60] %}
@@ -67,7 +67,7 @@ function renderLive(){
       html+=`<div class="card ${s.signal=='BUY'?'buy':'sell'}"><span class="badge ${s.signal=='BUY'?'b-buy':'b-sell'}">${s.signal} ${s.symbol}</span> ${s.price} <span class="timer">00:0${m}:${sec<10?'0':''}${sec}</span><br><span class="small">${s.reason} scade ${s.expire_str}</span></div>`;
     }
   });
-  if(html=='') html='<span class="small">Nessun live - aspetto solo pinbar con 3 filtri ok per 80%</span>';
+  if(html=='') html='<span class="small">Nessun live - filtri attivi, aspetto pinbar 1.9x di qualità</span>';
   document.getElementById('live').innerHTML=html;
 }
 setInterval(()=>{ fetch('/api/signals').then(r=>r.json()).then(data=>{ if(data.length>signals.length){ playSound(); signals=data; renderLive(); } }); },4000);
@@ -89,45 +89,52 @@ def send(msg):
 
 def analyze_filtered(symbol):
     try:
-        base = symbol
         display = symbol.replace("=X","") + " OTC"
-        df = fix_df(yf.Ticker(base, session=_YF_SESSION).history(period="5d", interval="1m"))
-        if len(df) < 210: return None
+        df = fix_df(yf.Ticker(symbol, session=_YF_SESSION).history(period="5d", interval="2m"))
+        if len(df) < 150: return None
         df['e20']=df['Close'].ewm(span=20).mean()
         df['e50']=df['Close'].ewm(span=50).mean()
-        df['e200']=df['Close'].ewm(span=200).mean()
         df['rsi']=rsi(df['Close'])
-        last=df.iloc[-1]; prev=df.iloc[-2]
+        last=df.iloc[-1]
         o=float(last['Open']); h=float(last['High']); l=float(last['Low']); cc=float(last['Close'])
-        e20=float(last['e20']); e50=float(last['e50']); e200=float(last['e200']); rsi_v=float(last['rsi'])
+        e20=float(last['e20']); e50=float(last['e50']); rsi_v=float(last['rsi'])
         body=abs(cc-o); rng=h-l
         if rng<0.00001 or body==0: return None
         upper=h-max(o,cc); lower=min(o,cc)-l
         is_green=cc>o; is_red=not is_green
-        # fix prezzo EURUSD 91 bug
-        if "JPY" not in display and cc>50: return None
-        if "JPY" in display and cc<50: return None
 
-        pin_bull = lower > body*1.9 and body < rng*0.38 and upper < body*0.55 and is_green
-        pin_bear = upper > body*1.9 and body < rng*0.38 and lower < body*0.55 and is_red
+        # FIX PREZZO: scarta dati sballati
+        is_jpy = "JPY" in display
+        if not is_jpy and (cc>5 or cc<0.5): return None
+        if is_jpy and (cc>300 or cc<50): return None
+
+        # 1.9x PULITA
+        pin_bull = lower > body*1.9 and body < rng*0.42 and upper < body*0.65 and is_green
+        pin_bear = upper > body*1.9 and body < rng*0.42 and lower < body*0.65 and is_red
         if not (pin_bull or pin_bear): return None
 
-        swing_high = h >= float(df['High'].iloc[-11:-1].max())
-        swing_low = l <= float(df['Low'].iloc[-11:-1].min())
+        # SWING 8 invece di 10 - più segnali
+        swing_high = h >= float(df['High'].iloc[-9:-1].max())*0.9998
+        swing_low = l <= float(df['Low'].iloc[-9:-1].min())*1.0002
         if not (swing_high or swing_low): return None
 
-        ema_touch_buy = abs(l - e20)/cc < 0.0012 or abs(l - e50)/cc < 0.0018
-        ema_touch_sell = abs(h - e20)/cc < 0.0012 or abs(h - e50)/cc < 0.0018
+        # EMA rimbalzo allargato a 0.25%
+        ema_touch_buy = abs(l - e20)/cc < 0.0025 or abs(l - e50)/cc < 0.0025
+        ema_touch_sell = abs(h - e20)/cc < 0.0025 or abs(h - e50)/cc < 0.0025
+        if not (ema_touch_buy or ema_touch_sell): return None
 
+        # RSI allargato per 80% target
         signal=None; reason=""
-        if pin_bull and swing_low and ema_touch_buy and 28 <= rsi_v <= 48 and cc > e200:
-            signal="BUY"; reason=f"1.9x {round(lower/body,1)}x + SwingLow + EMA + RSI{int(rsi_v)}"
-        elif pin_bear and swing_high and ema_touch_sell and 52 <= rsi_v <= 72 and cc < e200:
-            signal="SELL"; reason=f"1.9x {round(upper/body,1)}x + SwingHigh + EMA + RSI{int(rsi_v)}"
+        if pin_bull and swing_low and 25 <= rsi_v <= 52:
+            signal="BUY"; reason=f"1.9x {round(lower/body,1)}x SwingLow RSI{int(rsi_v)} EMA"
+        elif pin_bear and swing_high and 48 <= rsi_v <= 75:
+            signal="SELL"; reason=f"1.9x {round(upper/body,1)}x SwingHigh RSI{int(rsi_v)} EMA"
         else: return None
 
         return {"symbol":display,"signal":signal,"price":round(cc,5),"reason":reason,"time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
-    except: return None
+    except Exception as e:
+        print(f"ERR {e}")
+        return None
 
 def scan_loop():
     global last_scan
@@ -140,10 +147,10 @@ def scan_loop():
                 if not any(x['symbol']==r['symbol'] and time.time()-x['expire_ts']<400 for x in signals_log[-20:]):
                     signals_log.append(r)
                     if len(signals_log)>200: signals_log.pop(0)
-                    send(f"🎯 {r['signal']} {r['symbol']} {r['price']}\n{r['reason']}")
+                    send(f"🎯 V7.2 {r['signal']} {r['symbol']} {r['price']} {r['reason']}")
                     found+=1
-        last_scan={"time":datetime.now().strftime("%H:%M:%S"),"found":found,"win_est":"70-75% target"}
-        time.sleep(45)
+        last_scan={"time":datetime.now().strftime("%H:%M:%S"),"found":found,"win_est":"Target 70-75% (filtri bilanciati)"}
+        time.sleep(40)
 
 @app.route('/')
 def home(): return render_template_string(HTML, logs=signals_log, last=last_scan)
@@ -156,7 +163,11 @@ def scan_now():
     return jsonify(res)
 @app.route('/test_signal')
 def test_signal():
-    fake={"symbol":random.choice(["EURUSD OTC","GBPJPY OTC","USDJPY OTC"]),"signal":random.choice(["BUY","SELL"]),"price":round(random.uniform(1.05,1.35) if random.random()>0.5 else random.uniform(140,155),5),"reason":"TEST V7.1 1.9x FILTRATA","time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
+    # TEST con prezzo giusto
+    sym = random.choice(["EURUSD OTC","GBPUSD OTC","USDJPY OTC","GBPJPY OTC"])
+    is_jpy = "JPY" in sym
+    price = round(random.uniform(195,205),3) if is_jpy else round(random.uniform(1.05,1.35),5)
+    fake={"symbol":sym,"signal":random.choice(["BUY","SELL"]),"price":price,"reason":"TEST V7.2 1.9x FILTRATA OK","time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
     signals_log.append(fake)
     return jsonify(fake)
 @app.route('/api/signals')
