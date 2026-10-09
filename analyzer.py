@@ -1,4 +1,4 @@
-# Analyzer.py - MEDIO STRETTO + PRECISE 68% - 21 REALI 3 MIN
+# Analyzer.py - FINALE 64% BILANCIATO - MEDIO STRETTO
 import os, json, time, requests
 import pandas as pd
 import yfinance as yf
@@ -25,35 +25,32 @@ class PinBarAnalyzer:
         try:
             with open(self.storico_file, 'w') as f: json.dump(self.storico, f, indent=2)
         except: pass
-    def is_pinbar_preciso(self, df):
-        if len(df) < 30: return None, 0, 0
-        last = df.iloc[-2]; prev = df.iloc[-3]
+    def is_pinbar_64(self, df):
+        if len(df) < 25: return None, 0, 0
+        last = df.iloc[-2]
         o,h,l,c = float(last['open']), float(last['high']), float(last['low']), float(last['close'])
-        o2,c2 = float(prev['open']), float(prev['close'])
         body = abs(c - o); upper = h - max(c, o); lower = min(c, o) - l; total = h - l
         if total == 0: return None, 0, 0
-        if body == 0: body = total * 0.05
-        if body > total * 0.28: return None, 0, 0
-        ema20 = df['close'].rolling(20).mean().iloc[-2]
-        if lower > body * 2.0 and upper < body * 0.9 and lower > total * 0.55 and c > o and c > ema20 and c2 < o2:
-            score = (lower/total)*100
-            if score >= 68: return "BUY", round(score,1), round(lower/body,1)
-        if upper > body * 2.0 and lower < body * 0.9 and upper > total * 0.55 and c < o and c < ema20 and c2 > o2:
-            score = (upper/total)*100
-            if score >= 68: return "SELL", round(score,1), round(upper/body,1)
+        if body == 0: body = total * 0.06
+        if body > total * 0.35: return None, 0, 0
+        sb = (lower/total)*100; ss = (upper/total)*100
+        if lower > body * 1.7 and upper < body * 1.0 and sb >= 64 and c > o:
+            return "BUY", round(sb,1), round(lower/max(body,0.00001),1)
+        if upper > body * 1.7 and lower < body * 1.0 and ss >= 64 and c < o:
+            return "SELL", round(ss,1), round(upper/max(body,0.00001),1)
         return None, 0, 0
     def analyze(self, df, pair):
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
         df.columns = [c.lower() for c in df.columns]
-        signal, score, tail = self.is_pinbar_preciso(df)
+        signal, score, tail = self.is_pinbar_64(df)
         if not signal: return None
         now = datetime.now(); expiry = now + timedelta(minutes=3)
         segnale = {"pair": pair, "signal": signal, "score": score, "tail": tail, "prezzo": float(df.iloc[-2]['close']),
                    "time_str": now.strftime("%d/%m %H:%M:%S"), "expiry_time": expiry.strftime("%H:%M:%S"),
                    "timestamp": now.timestamp(), "expiry_timestamp": expiry.timestamp(), "scadenza": "3 MIN", "status": "ATTIVO"}
-        if any(s['pair']==pair and abs(s['timestamp']-segnale['timestamp'])<180 for s in self.storico[-20:]): return None
+        if any(s['pair']==pair and abs(s['timestamp']-segnale['timestamp'])<150 for s in self.storico[-20:]): return None
         self.storico.append(segnale); self.save()
-        send_telegram(f"🎯 PRECISE {signal} {pair} ⏰3 MIN\nscore {score}% coda {tail}x\n{segnale['prezzo']:.5f}\n{segnale['time_str']}->{segnale['expiry_time']}")
+        send_telegram(f"🎯 64% {signal} {pair} ⏰3 MIN\nscore {score}% coda {tail}x\n{segnale['prezzo']:.5f}\n{segnale['time_str']}->{segnale['expiry_time']}")
         return segnale
     def get_pending(self):
         now = datetime.now().timestamp()
@@ -63,75 +60,25 @@ class PinBarAnalyzer:
         return [s for s in self.storico if s['status']=="ATTIVO" and now - s['timestamp'] < 200]
     def get_history(self): return self.storico[-40:][::-1]
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","AUDCAD=X"]
 app = Flask(__name__)
 analyzer = PinBarAnalyzer()
-scan_count = 0; pair_index = 0; last_scan = 0; last_debug = "MEDIO PRECISE"
+scan_count = 0; pair_index = 0; last_scan = 0; last_debug = "64% MODE"
 
 HTML = """
 <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{background:#0f0f0f;color:#fff;font-family:Arial;padding:8px;margin:0}
 .top{text-align:center;color:#ffeb00;font-size:22px;font-weight:bold;padding:8px;background:#1c1c1c;border-radius:10px}
-.badge{text-align:center;background:#252525;padding:6px;border-radius:7px;margin:6px 0;font-size:11px;color:#ccc}
+.badge{text-align:center;background:#252525;padding:6px;border-radius:7px;margin:6px 0;font-size:11px}
 .card{border:1.5px solid #00e676;border-radius:8px;padding:7px 10px;margin-bottom:5px;background:#1e1e1e;font-size:13px;display:flex;justify-content:space-between;align-items:center}
 .sell{border-color:#ff5252}
-.exp{color:#ffeb00;font-weight:bold;font-size:12px;margin-left:6px}
+.exp{color:#ffeb00;font-weight:bold;margin-left:6px}
 .r{color:#aaa;font-size:11px}
 .storico{margin-top:12px;border-top:1px solid #2a2a2a;padding-top:8px}
 .storico h3{color:#888;font-size:11px;margin:5px 0}
 .old{padding:5px 8px;margin-bottom:3px;background:#181818;color:#777;font-size:11px;display:flex;justify-content:space-between;border-radius:5px}
 </style></head><body>
 <div class="top" id="clock">00:00:00</div>
-<div class="badge">🎯 PRECISE 68%+ | {{pending|length}} LIVE | Scan {{scan_count}} | {{last_debug}}</div>
-
-{% for h in pending[::-1] %}
-<div class="card {{'sell' if h.signal=='SELL' else ''}}">
-<span>🎯 <b>{{h.pair}}</b> {{h.signal}} <span class="exp">⏰ {{h.expiry_time}}</span></span>
-<span class="r">{{h.time_str}} • {{h.score}}% • {{h.tail}}x</span>
-</div>
-{% endfor %}
-
-{% if pending|length==0 %}
-<div style="text-align:center;color:#555;font-size:12px;padding:15px">In attesa di pinbar precise...</div>
-{% endif %}
-
-<div class="storico">
-<h3>📜 STORICO 40 SEGNALI</h3>
-{% for h in history %}
-<div class="old"><span>{{h.time_str}} <b>{{h.pair}}</b> {{h.signal}}</span><span>{{h.status}} {{h.score}}%</span></div>
-{% endfor %}
-</div>
-
-<audio id="beep" preload="auto"><source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg"></audio>
-<script>
-function upd(){document.getElementById('clock').innerText=new Date().toLocaleTimeString('it-IT')}setInterval(upd,1000);upd();
-function play(){try{document.getElementById('beep').play();let c=new(window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();o.frequency.value=950;o.connect(c.destination);o.start();o.stop(c.currentTime+0.4);}catch(e){}}
-if({{pending|length}}>0){setTimeout(play,400)}
-setTimeout(()=>location.reload(),15000);
-</script>
-</body></html>
-"""
-
-def do_scan():
-    global scan_count, pair_index, last_scan, last_debug
-    if time.time() - last_scan < 20: return
-    last_scan = time.time(); scan_count += 1
-    batch = PAIRS[pair_index:pair_index+7]
-    if len(batch) < 7: batch += PAIRS[:7-len(batch)]
-    pair_index = (pair_index + 7) % len(PAIRS)
-    found = 0
-    for sym in batch:
-        try:
-            df = yf.Ticker(sym).history(period="1d", interval="1m", auto_adjust=False)
-            if analyzer.analyze(df, sym.replace("=X","")): found += 1
-        except: continue
-    last_debug = f"PRECISE {batch[0][:6]} +{found} live {len(analyzer.get_pending())}"
-
-@app.route('/')
-def home():
-    do_scan()
-    return render_template_string(HTML, pending=analyzer.get_pending(), history=analyzer.get_history(), scan_count=scan_count, last_debug=last_debug, now=datetime.now().strftime("%H:%M:%S"))
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+<div class="badge">🎯 64% | {{pending|length}} LIVE | Scan {{scan_count}} | {{last_debug}}</div>
+{% for h in pending[::-1] %}<div class="card {{'sell' if h.signal=='SELL' else ''}}"><span>🎯 <b>{{h.pair}}</b> {{h.signal}} <span class="exp">⏰ {{h.expiry_time}}</span></span><span class="r">{{h.time_str}} {{h.score}}% {{h.tail}}x</span></
