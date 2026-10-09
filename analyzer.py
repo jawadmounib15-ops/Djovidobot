@@ -106,13 +106,13 @@ def analyze_otc(symbol):
         is_green=cc>o; is_red=not is_green
 
         # PINBAR PULITA 1.9x - SOLO QUESTO
-        pin_bull = lower > body*1.8 and body < rng*0.40 and upper < body*0.80
-        pin_bear = upper > body*1.8 and body < rng*0.40 and lower < body*0.80
+        pin_bull = lower > body*2.2 and body < rng*0.40 and upper < body*0.80
+        pin_bear = upper > body*2.2 and body < rng*0.40 and lower < body*0.80
 
         if pin_bull and is_green:
-            return {"symbol":clean,"signal":"BUY","price":round(cc,5),"reason":f"PINBAR 1.8x BULL coda {round(lower/body,1)}x","time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
+            return {"symbol":clean,"signal":"BUY","price":round(cc,5),"reason":f"PINBAR 2.2x BULL coda {round(lower/body,1)}x","time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
         if pin_bear and is_red:
-            return {"symbol":clean,"signal":"SELL","price":round(cc,5),"reason":f"PINBAR 1.8x BEAR coda {round(upper/body,1)}x","time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
+            return {"symbol":clean,"signal":"SELL","price":round(cc,5),"reason":f"PINBAR 2.2x BEAR coda {round(upper/body,1)}x","time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
     except: return None
     return None
 
