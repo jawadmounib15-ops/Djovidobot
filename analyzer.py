@@ -1,4 +1,4 @@
-# Analyzer.py - FINALE PRECISE + ULTRA STRETTO - 21 REALI 3 MIN
+# Analyzer.py - MEDIO STRETTO + PRECISE 68% - 21 REALI 3 MIN
 import os, json, time, requests
 import pandas as pd
 import yfinance as yf
@@ -66,26 +66,50 @@ class PinBarAnalyzer:
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 app = Flask(__name__)
 analyzer = PinBarAnalyzer()
-scan_count = 0; pair_index = 0; last_scan = 0; last_debug = "PRECISE MODE"
+scan_count = 0; pair_index = 0; last_scan = 0; last_debug = "MEDIO PRECISE"
 
 HTML = """
 <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-body{background:#0e0e0e;color:#fff;font-family:Arial;padding:4px;margin:0}
-.top{text-align:center;color:#ffeb00;font-size:16px;font-weight:bold;padding:4px;background:#1a1a1a;border-radius:6px}
-.badge{text-align:center;background:#2a2a2a;padding:3px;border-radius:5px;margin:4px 0;font-size:9px}
-.card{border-left:3px solid #00e676;border-radius:4px;padding:3px 6px;margin-bottom:3px;background:#1e1e1e;font-size:11px;display:flex;justify-content:space-between}
-.sell{border-left-color:#ff5252}.exp{color:#ffeb00;font-weight:bold}.r{color:#999;font-size:9px}
-.storico{margin-top:8px;border-top:1px solid #222;padding-top:4px}
-.storico h3{color:#666;font-size:9px;margin:2px 0}
-.old{padding:2px 5px;margin-bottom:2px;background:#161616;color:#666;font-size:9px;display:flex;justify-content:space-between;border-radius:3px}
+body{background:#0f0f0f;color:#fff;font-family:Arial;padding:8px;margin:0}
+.top{text-align:center;color:#ffeb00;font-size:22px;font-weight:bold;padding:8px;background:#1c1c1c;border-radius:10px}
+.badge{text-align:center;background:#252525;padding:6px;border-radius:7px;margin:6px 0;font-size:11px;color:#ccc}
+.card{border:1.5px solid #00e676;border-radius:8px;padding:7px 10px;margin-bottom:5px;background:#1e1e1e;font-size:13px;display:flex;justify-content:space-between;align-items:center}
+.sell{border-color:#ff5252}
+.exp{color:#ffeb00;font-weight:bold;font-size:12px;margin-left:6px}
+.r{color:#aaa;font-size:11px}
+.storico{margin-top:12px;border-top:1px solid #2a2a2a;padding-top:8px}
+.storico h3{color:#888;font-size:11px;margin:5px 0}
+.old{padding:5px 8px;margin-bottom:3px;background:#181818;color:#777;font-size:11px;display:flex;justify-content:space-between;border-radius:5px}
 </style></head><body>
 <div class="top" id="clock">00:00:00</div>
 <div class="badge">🎯 PRECISE 68%+ | {{pending|length}} LIVE | Scan {{scan_count}} | {{last_debug}}</div>
-{% for h in pending[::-1] %}<div class="card {{'sell' if h.signal=='SELL' else ''}}"><span><b>{{h.pair}}</b> {{h.signal}} <span class="exp">{{h.expiry_time}}</span></span><span class="r">{{h.time_str}} {{h.score}}% {{h.tail}}x</span></div>{% endfor %}
-<div class="storico"><h3>📜 STORICO 40</h3>{% for h in history %}<div class="old"><span>{{h.time_str}} {{h.pair}} {{h.signal}}</span><span>{{h.status}} {{h.score}}%</span></div>{% endfor %}</div>
+
+{% for h in pending[::-1] %}
+<div class="card {{'sell' if h.signal=='SELL' else ''}}">
+<span>🎯 <b>{{h.pair}}</b> {{h.signal}} <span class="exp">⏰ {{h.expiry_time}}</span></span>
+<span class="r">{{h.time_str}} • {{h.score}}% • {{h.tail}}x</span>
+</div>
+{% endfor %}
+
+{% if pending|length==0 %}
+<div style="text-align:center;color:#555;font-size:12px;padding:15px">In attesa di pinbar precise...</div>
+{% endif %}
+
+<div class="storico">
+<h3>📜 STORICO 40 SEGNALI</h3>
+{% for h in history %}
+<div class="old"><span>{{h.time_str}} <b>{{h.pair}}</b> {{h.signal}}</span><span>{{h.status}} {{h.score}}%</span></div>
+{% endfor %}
+</div>
+
 <audio id="beep" preload="auto"><source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg"></audio>
-<script>function upd(){document.getElementById('clock').innerText=new Date().toLocaleTimeString('it-IT')}setInterval(upd,1000);upd();function play(){try{document.getElementById('beep').play();let c=new(window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();o.frequency.value=950;o.connect(c.destination);o.start();o.stop(c.currentTime+0.3);}catch(e){}}if({{pending|length}}>0){setTimeout(play,300)}setTimeout(()=>location.reload(),15000);</script>
+<script>
+function upd(){document.getElementById('clock').innerText=new Date().toLocaleTimeString('it-IT')}setInterval(upd,1000);upd();
+function play(){try{document.getElementById('beep').play();let c=new(window.AudioContext||window.webkitAudioContext)();let o=c.createOscillator();o.frequency.value=950;o.connect(c.destination);o.start();o.stop(c.currentTime+0.4);}catch(e){}}
+if({{pending|length}}>0){setTimeout(play,400)}
+setTimeout(()=>location.reload(),15000);
+</script>
 </body></html>
 """
 
