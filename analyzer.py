@@ -68,11 +68,11 @@ class SafeAnalyzer:
 
         # SEGNALE BUY SUPER SICURO
         # 1. Pinbar coda 2.8x, 2. vicino a Bollinger bassa, 3. RSI risale da 30-50, 4. EMA20>EMA50
-        if lower > body * 2.8 and upper < body * 0.5 and score_buy >= 78 and c > o and l <= bb_l * 1.002 and rsi > rsi_prev and 32 < rsi < 58 and c > ema20 and ema20 > ema50:
+        if lower > body * 2.8 and upper < body * 0.5 and score_buy >= 70 and c > o and l <= bb_l * 1.002 and rsi > rsi_prev and 32 < rsi < 58 and c > ema20 and ema20 > ema50:
             return "BUY", round(score_buy,1), f"SAFE PINBAR {round(lower/body,1)}x BB+RSI {round(rsi,0)}", "SAFE"
 
         # SEGNALE SELL SUPER SICURO
-        if upper > body * 2.8 and lower < body * 0.5 and score_sell >= 78 and c < o and h >= bb_h * 0.998 and rsi < rsi_prev and 42 < rsi < 68 and c < ema20 and ema20 < ema50:
+        if upper > body * 2.8 and lower < body * 0.5 and score_sell >= 70 and c < o and h >= bb_h * 0.998 and rsi < rsi_prev and 42 < rsi < 68 and c < ema20 and ema20 < ema50:
             return "SELL", round(score_sell,1), f"SAFE PINBAR {round(upper/body,1)}x BB+RSI {round(rsi,0)}", "SAFE"
 
         # ENGULFING SOLO SE MOLTO FORTE + BB
