@@ -54,13 +54,13 @@ def scan():
             is_green=cc>o; is_red=not is_green
 
             # 1.9x LARGO come hai chiesto
-            pin_bull = lower > body*1.9 and body < rng*0.45 and upper < body*0.80 and is_green
-            pin_bear = upper > body*1.9 and body < rng*0.45 and lower < body*0.80 and is_red
+            pin_bull = lower > body*2.2 and body < rng*0.45 and upper < body*0.80 and is_green
+            pin_bear = upper > body*2.2 and body < rng*0.45 and lower < body*0.80 and is_red
 
             signal=None
-            if pin_bull and e20>e50 and 30<=rsi_v<=57:
+            if pin_bull and e20>e50 and 20<=rsi_v<=38:
                 signal="BUY"
-            if pin_bear and e20<e50 and 43<=rsi_v<=70:
+            if pin_bear and e20<e50 and 55<=rsi_v<=75:
                 signal="SELL"
 
             if signal:
