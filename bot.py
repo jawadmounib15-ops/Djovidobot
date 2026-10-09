@@ -17,7 +17,7 @@ _YF_SESSION = cffi_requests.Session(impersonate="chrome")
 
 @app.route('/')
 def home():
-    return f"BOT 2MIN LIVE - TOKEN:{bool(TOKEN)} CHAT:{bool(CHAT_ID)} - Pending:{len(pending)} - {len(PAIRS)} PAIRS - 2m"
+    return f"BOT 2MIN 2.8x LIVE - Pending:{len(pending)} - {len(PAIRS)} PAIRS"
 
 def send(msg):
     if not TOKEN or not CHAT_ID:
@@ -38,14 +38,13 @@ def rsi(s,p=14):
 
 def scan_2min():
     global pending
-    # pulisci vecchi segnali dopo 6 minuti
     pending = [p for p in pending if time.time() - p['time'] < 400]
     count = 0
     for symbol in PAIRS:
-        if count >= 2: # max 2 segnali per giro
+        if count >= 2:
             break
         clean = symbol.replace("=X","")
-        if clean in cooldown and time.time() - cooldown[clean] < 360: # 6 min cooldown
+        if clean in cooldown and time.time() - cooldown[clean] < 360:
             continue
         if any(p['symbol'] == clean for p in pending):
             continue
@@ -65,30 +64,23 @@ def scan_2min():
             is_green=c>o; is_red=not is_green
             body=abs(c-o); total_range=h-l
             upper=h-max(o,c); lower=min(o,c)-l
-
             if total_range < 0.000005:
                 total_range = body * 2.5 if body>0 else 0.00005
             if body == 0:
                 continue
-
             signal=None
-
-            # PINBAR 2 MIN - 2.6x STRETTA
-            pin_bull = lower > body*2.6 and body < total_range*0.35 and upper < body*0.6 and is_green
-            pin_bear = upper > body*2.6 and body < total_range*0.35 and lower < body*0.6 and is_red
-
+            # STRETTA PELO - 2.8x / 30% / 0.45x
+            pin_bull = lower > body*2.8 and body < total_range*0.30 and upper < body*0.45 and is_green
+            pin_bear = upper > body*2.8 and body < total_range*0.30 and lower < body*0.45 and is_red
             if pin_bull and price>e200 and e20>e50 and 30<=rsi_v<=60:
                 signal="BUY"
             if pin_bear and price<e200 and e20<e50 and 40<=rsi_v<=70:
                 signal="SELL"
-
             if signal:
-                scadenza = "6 MIN"
-                send(f"🎯 2MIN {signal} {clean} ⏰{scadenza} RSI{int(rsi_v)} Entry {price:.5f}\nCoda {lower/body:.1f}x" if signal=="BUY" else f"🎯 2MIN {signal} {clean} ⏰{scadenza} RSI{int(rsi_v)} Entry {price:.5f}\nCoda {upper/body:.1f}x")
+                send(f"🎯 2.8x {signal} {clean} ⏰6MIN RSI{int(rsi_v)} {price:.5f}")
                 pending.append({"symbol":clean,"signal":signal,"time":time.time()})
                 cooldown[clean]=time.time()
                 count+=1
-
         except Exception as e:
             print(f"ERR {clean}: {e}")
             continue
@@ -96,13 +88,13 @@ def scan_2min():
 def loop():
     time.sleep(5)
     if TOKEN and CHAT_ID:
-        send(f"🚀 BOT 2 MINUTI AVVIATO - {len(PAIRS)} coppie\nTimeframe 2m -> Scadenza 6 MIN\nPinbar 2.6x")
+        send(f"🚀 BOT 2MIN 2.8x AVVIATO - {len(PAIRS)} coppie")
     while True:
         try:
             scan_2min()
         except Exception as e:
             print(f"LOOP ERR {e}")
-        time.sleep(45) # scansiona ogni 45 sec
+        time.sleep(45)
 
 threading.Thread(target=loop, daemon=True).start()
 
