@@ -138,8 +138,8 @@ def analyze_pair(symbol, interval="2m"):
         if rng<0.00001 or body==0: return None
         upper=h-max(o,cc); lower=min(o,cc)-l
         is_green=cc>o; is_red=not is_green
-        pin_bull = lower > body*1.9 and body < rng*0.40 and upper < body*0.85 and is_green
-        pin_bear = upper > body*1.9 and body < rng*0.40 and lower < body*0.85 and is_red
+        pin_bull = lower > body*1.9 and body < rng*0.40 and upper < body*0.80 and is_green
+        pin_bear = upper > body*1.9 and body < rng*0.40 and lower < body*0.80 and is_red
         if not (pin_bull or pin_bear): return None
         swing_high = h >= float(df['High'].iloc[-6:-1].max())
         swing_low = l <= float(df['Low'].iloc[-6:-1].min())
