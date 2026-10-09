@@ -63,12 +63,12 @@ class SafeAnalyzer:
         score_sell = (upper/total)*100
 
         # BUY bilanciato 2.2x
-        if lower > body * 2.2 and upper < body * 1.0 and score_buy >= 72 and c > o and 28 < rsi < 62 and c > ema20:
+        if lower > body * 1.9 and upper < body * 1.0 and score_buy >= 72 and c > o and 28 < rsi < 62 and c > ema20:
             if c < bb_mid.iloc[-2]:
                 return "BUY", round(score_buy,1), f"PINBAR {round(lower/body,1)}x RSI {round(rsi,0)}", "V4.1"
 
         # SELL bilanciato
-        if upper > body * 2.2 and lower < body * 1.0 and score_sell >= 72 and c < o and 38 < rsi < 72 and c < ema20:
+        if upper > body * 1.9 and lower < body * 1.0 and score_sell >= 72 and c < o and 38 < rsi < 72 and c < ema20:
             if c > bb_mid.iloc[-2]:
                 return "SELL", round(score_sell,1), f"PINBAR {round(upper/body,1)}x RSI {round(rsi,0)}", "V4.1"
 
