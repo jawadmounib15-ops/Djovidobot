@@ -144,14 +144,14 @@ def analyze_pair(symbol, interval="2m"):
         swing_high = h >= float(df['High'].iloc[-6:-1].max())
         swing_low = l <= float(df['Low'].iloc[-6:-1].min())
         signal=None; reason=""
-        if pin_bear and swing_high and 40<=rsi_v<=76:
+        if pin_bear and swing_high and 20<=rsi_v<=38:
             signal="SELL"; reason="SWING HIGH (come tuo CADJPY foto)"
-        elif pin_bull and swing_low and 24<=rsi_v<=56:
+        elif pin_bull and swing_low and 55<=rsi_v<=75:
             signal="BUY"; reason="SWING LOW"
         else:
-            if pin_bull and e20>e50 and 30<=rsi_v<=58:
+            if pin_bull and e20>e50 and 20<=rsi_v<=38:
                 signal="BUY"; reason="Trend 1.9x"
-            if pin_bear and e20<e50 and 42<=rsi_v<=70:
+            if pin_bear and e20<e50 and 55<=rsi_v<=75:
                 signal="SELL"; reason="Trend 1.9x"
         if signal:
             now_ts = time.time()
