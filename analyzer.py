@@ -1,4 +1,4 @@
-# Analyzer.py - FINALE 64% BILANCIATO - MEDIO STRETTO
+# Analyzer.py - FIXED 64% - MEDIO STRETTO
 import os, json, time, requests
 import pandas as pd
 import yfinance as yf
@@ -50,7 +50,7 @@ class PinBarAnalyzer:
                    "timestamp": now.timestamp(), "expiry_timestamp": expiry.timestamp(), "scadenza": "3 MIN", "status": "ATTIVO"}
         if any(s['pair']==pair and abs(s['timestamp']-segnale['timestamp'])<150 for s in self.storico[-20:]): return None
         self.storico.append(segnale); self.save()
-        send_telegram(f"🎯 64% {signal} {pair} ⏰3 MIN\nscore {score}% coda {tail}x\n{segnale['prezzo']:.5f}\n{segnale['time_str']}->{segnale['expiry_time']}")
+        send_telegram(f"64% {signal} {pair} 3MIN score {score}% coda {tail}x {segnale['prezzo']:.5f} {segnale['time_str']}->{segnale['expiry_time']}")
         return segnale
     def get_pending(self):
         now = datetime.now().timestamp()
@@ -60,12 +60,12 @@ class PinBarAnalyzer:
         return [s for s in self.storico if s['status']=="ATTIVO" and now - s['timestamp'] < 200]
     def get_history(self): return self.storico[-40:][::-1]
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","AUDCAD=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 app = Flask(__name__)
 analyzer = PinBarAnalyzer()
 scan_count = 0; pair_index = 0; last_scan = 0; last_debug = "64% MODE"
 
-HTML = """
+HTML_PAGE = '''
 <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{background:#0f0f0f;color:#fff;font-family:Arial;padding:8px;margin:0}
@@ -80,5 +80,46 @@ body{background:#0f0f0f;color:#fff;font-family:Arial;padding:8px;margin:0}
 .old{padding:5px 8px;margin-bottom:3px;background:#181818;color:#777;font-size:11px;display:flex;justify-content:space-between;border-radius:5px}
 </style></head><body>
 <div class="top" id="clock">00:00:00</div>
-<div class="badge">🎯 64% | {{pending|length}} LIVE | Scan {{scan_count}} | {{last_debug}}</div>
-{% for h in pending[::-1] %}<div class="card {{'sell' if h.signal=='SELL' else ''}}"><span>🎯 <b>{{h.pair}}</b> {{h.signal}} <span class="exp">⏰ {{h.expiry_time}}</span></span><span class="r">{{h.time_str}} {{h.score}}% {{h.tail}}x</span></
+<div class="badge">64% | LIVE: {{pending|length}} | Scan {{scan_count}} | {{last_debug}}</div>
+{% for h in pending[::-1] %}
+<div class="card {{'sell' if h.signal=='SELL' else ''}}">
+<span>TARGET <b>{{h.pair}}</b> {{h.signal}} <span class="exp">{{h.expiry_time}}</span></span>
+<span class="r">{{h.time_str}} {{h.score}}% {{h.tail}}x</span>
+</div>
+{% endfor %}
+{% if pending|length==0 %}
+<div style="text-align:center;color:#555;font-size:12px;padding:15px">In attesa pinbar 64%...</div>
+{% endif %}
+<div class="storico"><h3>STORICO 40</h3>{% for h in history %}<div class="old"><span>{{h.time_str}} <b>{{h.pair}}</b> {{h.signal}}</span><span>{{h.status}} {{h.score}}%</span></div>{% endfor %}</div>
+<audio id="beep" preload="auto"><source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg"></audio>
+<script>
+function upd(){document.getElementById('clock').innerText=new Date().toLocaleTimeString('it-IT')}setInterval(upd,1000);upd();
+function play(){try{document.getElementById('beep').play()}catch(e){}}
+if({{pending|length}}>0){setTimeout(play,400)}
+setTimeout(()=>location.reload(),15000);
+</script>
+</body></html>
+'''
+
+def do_scan():
+    global scan_count, pair_index, last_scan, last_debug
+    if time.time() - last_scan < 18: return
+    last_scan = time.time(); scan_count += 1
+    batch = PAIRS[pair_index:pair_index+7]
+    if len(batch) < 7: batch += PAIRS[:7-len(batch)]
+    pair_index = (pair_index + 7) % len(PAIRS)
+    found = 0
+    for sym in batch:
+        try:
+            df = yf.Ticker(sym).history(period="1d", interval="1m", auto_adjust=False)
+            if analyzer.analyze(df, sym.replace("=X","")): found += 1
+        except: continue
+    last_debug = f"64% {batch[0][:6]} +{found} live {len(analyzer.get_pending())}"
+
+@app.route('/')
+def home():
+    do_scan()
+    return render_template_string(HTML_PAGE, pending=analyzer.get_pending(), history=analyzer.get_history(), scan_count=scan_count, last_debug=last_debug)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
