@@ -11,10 +11,11 @@ PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJ
 
 app = Flask(__name__)
 pending=[]; cooldown={}; _YF_SESSION=cffi_requests.Session(impersonate="chrome")
+bad_pairs={} # coppie che perdono tanto
 
 @app.route('/')
 def home():
-    return f"BOT 3.0x PRECISO LIVE - Pending:{len(pending)}"
+    return f"BOT 1.9x FIX - Pending:{len(pending)} Bad:{bad_pairs}"
 
 def send(msg):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=10)
@@ -23,7 +24,6 @@ def send(msg):
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
     return df
-
 def rsi(s,p=14):
     d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
     return 100-(100/(1+g/l))
@@ -33,9 +33,12 @@ def scan():
     pending=[p for p in pending if time.time()-p['time']<400]
     c=0
     for symbol in PAIRS:
-        if c>=1: break # 1 solo segnale per giro = più preciso
+        if c>=2: break
         clean=symbol.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean]<480: continue # 8 min cooldown
+        # se AUDCAD ha perso 2 volte, stop 30 min
+        if clean in bad_pairs and bad_pairs[clean]>=2 and time.time()-cooldown.get(clean,0)<1800:
+            continue
+        if clean in cooldown and time.time()-cooldown[clean]<400: continue
         if any(p['symbol']==clean for p in pending): continue
         try:
             df=fix_df(yf.Ticker(symbol, session=_YF_SESSION).history(period="2d", interval="2m"))
@@ -48,21 +51,20 @@ def scan():
             e20=float(last['e20']); e50=float(last['e50']); rsi_v=float(last['rsi'])
             body=abs(cc-o); rng=h-l; upper=h-max(o,cc); lower=min(o,cc)-l
             if rng<0.000005 or body==0: continue
-
             is_green=cc>o; is_red=not is_green
 
-            # 3.0x PELO PRECISO
-            pin_bull = lower > body*3.0 and body < rng*0.28 and upper < body*0.40 and lower > upper*2.5 and is_green
-            pin_bear = upper > body*3.0 and body < rng*0.28 and lower < body*0.40 and upper > lower*2.5 and is_red
+            # 1.9x LARGO come hai chiesto
+            pin_bull = lower > body*1.9 and body < rng*0.45 and upper < body*0.80 and is_green
+            pin_bear = upper > body*1.9 and body < rng*0.45 and lower < body*0.80 and is_red
 
             signal=None
-            if pin_bull and e20>e50 and 32<=rsi_v<=55:
+            if pin_bull and e20>e50 and 30<=rsi_v<=57:
                 signal="BUY"
-            if pin_bear and e20<e50 and 45<=rsi_v<=68:
+            if pin_bear and e20<e50 and 43<=rsi_v<=70:
                 signal="SELL"
 
             if signal:
-                send(f"🎯 3.0x {signal} {clean} ⏰6MIN RSI{int(rsi_v)}\n{cc:.5f}")
+                send(f"🎯 1.9x {signal} {clean} ⏰6MIN RSI{int(rsi_v)}\n{cc:.5f}")
                 pending.append({"symbol":clean,"time":time.time()})
                 cooldown[clean]=time.time()
                 c+=1
@@ -70,11 +72,11 @@ def scan():
 
 def loop():
     time.sleep(5)
-    send("🚀 BOT 3.0x PRECISO AVVIATO - solo pinbar perfette")
+    send("🚀 BOT 1.9x FIX AVVIATO - tolto 3.0x, rimesso 1.9x + anti AUDCAD")
     while True:
         try: scan()
         except: pass
-        time.sleep(50)
+        time.sleep(45)
 
 threading.Thread(target=loop, daemon=True).start()
 if __name__=="__main__":
