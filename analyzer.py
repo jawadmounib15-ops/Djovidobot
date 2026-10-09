@@ -1,4 +1,4 @@
-# Analyzer.py - V6.1 FIX STORICO + SCADENZA + SUONO
+# Analyzer.py - V6.2 FIX 1.9x + STORICO + SCADENZA 6MIN + SUONO
 import os, time, threading
 from flask import Flask, render_template_string, jsonify
 import yfinance as yf
@@ -17,10 +17,10 @@ PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X",
 app = Flask(__name__)
 _YF_SESSION = cffi_requests.Session(impersonate="chrome")
 signals_log = []
-last_scan = {"time":"In avvio...","found":0,"debug":"Avvio scan..."}
+last_scan = {"time":"In avvio 1.9x...","found":0,"debug":"Avvio..."}
 
 HTML = """
-<!DOCTYPE html><html><head><title>Analyzer V6.1</title>
+<!DOCTYPE html><html><head><title>Analyzer 1.9x</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body{background:#0f172a;color:#e2e8f0;font-family:Arial;padding:12px}
@@ -29,24 +29,24 @@ body{background:#0f172a;color:#e2e8f0;font-family:Arial;padding:12px}
 .badge{padding:4px 10px;border-radius:6px;font-weight:bold}
 .b-buy{background:#22c55e;color:#000}.b-sell{background:#ef4444;color:#fff}
 .timer{font-size:18px;font-weight:bold;color:#facc15}
-button{padding:12px;border-radius:10px;background:#3b82f6;color:white;border:none;font-weight:bold;width:100%;margin:5px 0}
+button{padding:12px;border-radius:10px;color:white;border:none;font-weight:bold;width:100%;margin:5px 0}
+.btn-scan{background:#3b82f6}.btn-test{background:#22c55e}
 table{width:100%;border-collapse:collapse;font-size:11px} th,td{padding:6px;border-bottom:1px solid #334155}
 .small{color:#94a3b8;font-size:11px}
 </style></head><body>
-<h2>📊 Analyzer V6.1 - FIX 1.5x</h2>
+<h2>📊 Analyzer V6.2 - 1.9x LIVE</h2>
 <div class="card">⏰ {{last.time}} | Trovati: {{last.found}} | Totale: {{logs|length}}<br><span class="small">{{last.debug}}</span></div>
 <div class="card">
-<button onclick="scanNow()">🔍 SCANNA ORA</button>
-<button onclick="testSound()" style="background:#22c55e">🔊 TEST SUONO + SEGNALE FAKE</button>
+<button class="btn-scan" onclick="scanNow()">🔍 SCANNA ORA</button>
+<button class="btn-test" onclick="testSound()">🔊 TEST SUONO + SEGNALE FAKE 1.9x</button>
 </div>
-<div class="card"><h3>🔴 LIVE 6 Min</h3><div id="live">Caricamento...</div></div>
+<div class="card"><h3>🔴 LIVE 6 Min (1.9x)</h3><div id="live">In attesa...</div></div>
 <div class="card"><h3>📜 STORICO</h3>
 <table><tr><th>Ora</th><th>Segnale</th><th>Prezzo</th><th>RSI</th><th>Motivo</th></tr>
 {% for s in logs[::-1][:50] %}
 <tr><td>{{s.time}}</td><td><span class="badge {{'b-buy' if s.signal=='BUY' else 'b-sell'}}">{{s.signal}} {{s.symbol}}</span></td>
 <td>{{s.price}}</td><td>{{s.rsi}}</td><td>{{s.reason}}</td></tr>
 {% endfor %}</table>
-{% if logs|length==0 %}<p class="small">Ancora vuoto - Render ci mette 60 sec al primo avvio, aspetta e clicca SCANNA ORA</p>{% endif %}
 </div>
 <script>
 let signals = {{logs|tojson}};
@@ -54,20 +54,19 @@ function playSound(){
   try{
     const ctx = new (window.AudioContext||window.webkitAudioContext)();
     const o = ctx.createOscillator(); const g = ctx.createGain();
-    o.frequency.value=880; o.connect(g); g.connect(ctx.destination);
+    o.frequency.value=900; o.connect(g); g.connect(ctx.destination);
     g.gain.setValueAtTime(1, ctx.currentTime); o.start();
     setTimeout(()=>{o.stop(); ctx.close()}, 600);
   }catch(e){}
-  try{ navigator.vibrate(500); }catch(e){}
+  try{ navigator.vibrate(600); }catch(e){}
 }
 function testSound(){
   playSound();
-  fetch('/test_signal').then(r=>r.json()).then(d=>{ alert('TEST: '+d.signal+' '+d.symbol); location.reload(); });
+  fetch('/test_signal').then(r=>r.json()).then(d=>{ location.reload(); });
 }
 function scanNow(){
-  playSound();
   fetch('/scan_now').then(r=>r.json()).then(d=>{
-    if(d.length>0){ playSound(); }
+    if(d.length>0) playSound();
     location.reload();
   });
 }
@@ -81,7 +80,7 @@ function renderLive(){
       html+=`<div class="card ${s.signal=='BUY'?'buy':'sell'}"><span class="badge ${s.signal=='BUY'?'b-buy':'b-sell'}">${s.signal} ${s.symbol}</span> ${s.price} <span class="timer">00:0${m}:${sec<10?'0':''}${sec}</span><br><span class="small">${s.reason} scade ${s.expire_str}</span></div>`;
     }
   });
-  if(html=='') html='<span class="small">Nessun live - in attesa pinbar 1.5x</span>';
+  if(html=='') html='<span class="small">Nessun live - in attesa pinbar 1.9x</span>';
   document.getElementById('live').innerHTML=html;
 }
 setInterval(()=>{
@@ -121,26 +120,27 @@ def analyze_pair(symbol):
         upper=h-max(o,cc); lower=min(o,cc)-l
         is_green=cc>o; is_red=not is_green
 
-        # FIX: 1.5x LARGO come tuo screen CADJPY
-        pin_bull = lower > body*1.5 and body < rng*0.80 and is_green
-        pin_bear = upper > body*1.5 and body < rng*0.80 and is_red
+        # === 1.9x ESATTO COME HAI CHIESTO ===
+        pin_bull = lower > body*1.9 and body < rng*0.45 and upper < body*0.80 and is_green
+        pin_bear = upper > body*1.9 and body < rng*0.45 and lower < body*0.80 and is_red
+
         if not (pin_bull or pin_bear):
-            return None, f"{clean} no pinbar"
+            return None, f"{clean} no 1.9x"
 
         swing_high = h >= float(df['High'].iloc[-6:-1].max())*0.9999
         swing_low = l <= float(df['Low'].iloc[-6:-1].min())*1.0001
 
         signal=None; reason=""
         if pin_bear and swing_high and 38<=rsi_v<=78:
-            signal="SELL"; reason=f"SWING HIGH {round(upper/body,1)}x"
-        elif pin_bull and swing_low and 22<=rsi_v<=38:
-            signal="BUY"; reason=f"SWING LOW {round(lower/body,1)}x"
+            signal="SELL"; reason=f"SWING HIGH 1.9x {round(upper/body,1)}x"
+        elif pin_bull and swing_low and 22<=rsi_v<=58:
+            signal="BUY"; reason=f"SWING LOW 1.9x {round(lower/body,1)}x"
         elif pin_bull and e20>e50 and 25<=rsi_v<=60:
-            signal="BUY"; reason=f"TREND {round(lower/body,1)}x"
-        elif pin_bear and e20<e50 and 55<=rsi_v<=75:
-            signal="SELL"; reason=f"TREND {round(upper/body,1)}x"
+            signal="BUY"; reason=f"TREND 1.9x {round(lower/body,1)}x"
+        elif pin_bear and e20<e50 and 40<=rsi_v<=75:
+            signal="SELL"; reason=f"TREND 1.9x {round(upper/body,1)}x"
         else:
-            return None, f"{clean} RSI {int(rsi_v)} no filtro"
+            return None, f"{clean} RSI {int(rsi_v)} filtro"
 
         if signal:
             return {"symbol":clean,"signal":signal,"price":round(cc,5),"rsi":int(rsi_v),
@@ -152,20 +152,19 @@ def analyze_pair(symbol):
 
 def scan_loop():
     global last_scan
-    time.sleep(8)
+    time.sleep(5)
     while True:
-        logs_debug=[]
-        found=0
+        found=0; dbg=[]
         for sym in PAIRS:
-            r,dbg=analyze_pair(sym)
-            logs_debug.append(dbg)
+            r,d=analyze_pair(sym)
+            dbg.append(d)
             if r:
                 if not any(x['symbol']==r['symbol'] and abs(time.time()-x['expire_ts'])<300 for x in signals_log[-20:]):
                     signals_log.append(r)
                     if len(signals_log)>200: signals_log.pop(0)
-                    send(f"🔔 {r['signal']} {r['symbol']} {r['price']} {r['reason']} scade {r['expire_str']}")
+                    send(f"🎯 1.9x {r['signal']} {r['symbol']} {r['price']} RSI{r['rsi']} {r['reason']} scade {r['expire_str']}")
                     found+=1
-        last_scan={"time":datetime.now().strftime("%H:%M:%S"),"found":found,"debug":" | ".join(logs_debug[:4])}
+        last_scan={"time":datetime.now().strftime("%H:%M:%S"),"found":found,"debug":" | ".join(dbg[:3])}
         time.sleep(40)
 
 @app.route('/')
@@ -181,7 +180,7 @@ def scan_now():
 def test_signal():
     fake={"symbol":random.choice(["CADJPY","EURUSD","GBPJPY"]),"signal":random.choice(["BUY","SELL"]),
           "price":round(random.uniform(100,150),3),"rsi":random.randint(35,65),
-          "reason":"TEST SUONO 1.5x","time":datetime.now().strftime("%H:%M:%S"),
+          "reason":"TEST 1.9x","time":datetime.now().strftime("%H:%M:%S"),
           "expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
     signals_log.append(fake)
     return jsonify(fake)
