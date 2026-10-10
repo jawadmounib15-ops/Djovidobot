@@ -1,178 +1,180 @@
-# Analyzer.py - V7.2 OTC 1.9x FILTRATA FIX PREZZO + TROVA SEGNALI
-import os, time, threading, random
-from flask import Flask, render_template_string, jsonify
-import yfinance as yf
+# Analyzer.py - OTC WEEKEND PINBAR - ANTI LAG 5 ALLA VOLTA - 1MIN->3MIN
+import os, json, time, requests
 import pandas as pd
-from curl_cffi import requests as cffi_requests
-import requests as req
+import yfinance as yf
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from flask import Flask, render_template_string
 
-TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", "")).strip()
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
+TOKEN = (os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN") or "").strip()
+CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or "").strip()
+ITALIA = ZoneInfo("Europe/Rome")
 
-OTC_PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURGBP=X","GBPCHF=X","EURCHF=X","AUDCAD=X","CADJPY=X","CHFJPY=X"]
-
-app = Flask(__name__)
-_YF_SESSION = cffi_requests.Session(impersonate="chrome")
-signals_log = []
-last_scan = {"time":"Avvio V7.2...","found":0,"win_est":"Calcolo..."}
-
-HTML = """
-<!DOCTYPE html><html><head><title>OTC 1.9x V7.2</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body{background:#0f172a;color:#e2e8f0;font-family:Arial;padding:12px}
-.card{background:#1e293b;padding:12px;border-radius:12px;margin:8px 0;border-left:5px solid #f59e0b}
-.buy{border-left-color:#22c55e}.sell{border-left-color:#ef4444}
-.badge{padding:4px 10px;border-radius:6px;font-weight:bold}
-.b-buy{background:#22c55e;color:#000}.b-sell{background:#ef4444;color:#fff}
-.timer{color:#facc15;font-weight:bold;font-size:18px}
-button{padding:12px;border-radius:10px;color:white;border:none;font-weight:bold;width:100%;margin:5px 0}
-.btn-scan{background:#3b82f6}.btn-test{background:#22c55e}
-.small{color:#94a3b8;font-size:10px}
-table{width:100%;border-collapse:collapse;font-size:11px} th,td{padding:6px;border-bottom:1px solid #334155}
-</style></head><body>
-<h2>🔶 V7.2 OTC 1.9x FILTRATA 80% TARGET</h2>
-<div class="card">⏰ {{last.time}} | OTC Trovati: {{last.found}} | Totale: {{logs|length}} | {{last.win_est}}<br><span class="small">Filtri: Swing 8 + EMA rimbalzo 0.25% + RSI 25-50/50-75</span></div>
-<div class="card">
-<button class="btn-scan" onclick="scanNow()">🔍 SCANNA OTC FILTRATA</button>
-<button class="btn-test" onclick="testSound()">🔊 TEST SUONO (prezzo giusto)</button>
-</div>
-<div class="card"><h3>🔴 LIVE 6 Min</h3><div id="live">In attesa...</div></div>
-<div class="card"><h3>📜 STORICO OTC</h3>
-<table><tr><th>Ora</th><th>Segnale</th><th>Prezzo</th><th>Motivo</th></tr>
-{% for s in logs[::-1][:60] %}
-<tr><td>{{s.time}}</td><td><span class="badge {{'b-buy' if s.signal=='BUY' else 'b-sell'}}">{{s.signal}} {{s.symbol}}</span></td><td>{{s.price}}</td><td>{{s.reason}}</td></tr>
-{% endfor %}</table>
-</div>
-<script>
-let signals = {{logs|tojson}};
-function playSound(){
-  try{
-    const ctx = new (window.AudioContext||window.webkitAudioContext)();
-    const o = ctx.createOscillator(); const g = ctx.createGain();
-    o.frequency.value=1000; o.connect(g); g.connect(ctx.destination);
-    g.gain.setValueAtTime(1, ctx.currentTime); o.start();
-    setTimeout(()=>{o.stop(); ctx.close()}, 800);
-  }catch(e){}
-}
-function testSound(){ playSound(); fetch('/test_signal').then(()=>location.reload()); }
-function scanNow(){ fetch('/scan_now').then(r=>r.json()).then(d=>{ if(d.length>0) playSound(); location.reload(); }); }
-function renderLive(){
-  const now=Date.now(); let html='';
-  signals.slice(-10).reverse().forEach(s=>{
-    const diff=Math.floor((s.expire_ts*1000-now)/1000);
-    if(diff>0){
-      const m=Math.floor(diff/60); const sec=diff%60;
-      html+=`<div class="card ${s.signal=='BUY'?'buy':'sell'}"><span class="badge ${s.signal=='BUY'?'b-buy':'b-sell'}">${s.signal} ${s.symbol}</span> ${s.price} <span class="timer">00:0${m}:${sec<10?'0':''}${sec}</span><br><span class="small">${s.reason} scade ${s.expire_str}</span></div>`;
-    }
-  });
-  if(html=='') html='<span class="small">Nessun live - filtri attivi, aspetto pinbar 1.9x di qualità</span>';
-  document.getElementById('live').innerHTML=html;
-}
-setInterval(()=>{ fetch('/api/signals').then(r=>r.json()).then(data=>{ if(data.length>signals.length){ playSound(); signals=data; renderLive(); } }); },4000);
-setInterval(renderLive,1000);
-renderLive();
-</script></body></html>
-"""
-
-def fix_df(df):
-    if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
-    return df
-def rsi(s,p=14):
-    d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
-    return 100-(100/(1+g/l))
-def send(msg):
+def send_telegram(msg):
     if not TOKEN or not CHAT_ID: return
-    try: req.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=8)
+    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id": CHAT_ID, "text": msg}, timeout=5)
     except: pass
 
-def analyze_filtered(symbol):
-    try:
-        display = symbol.replace("=X","") + " OTC"
-        df = fix_df(yf.Ticker(symbol, session=_YF_SESSION).history(period="5d", interval="2m"))
-        if len(df) < 150: return None
-        df['e20']=df['Close'].ewm(span=20).mean()
-        df['e50']=df['Close'].ewm(span=50).mean()
-        df['rsi']=rsi(df['Close'])
-        last=df.iloc[-1]
-        o=float(last['Open']); h=float(last['High']); l=float(last['Low']); cc=float(last['Close'])
-        e20=float(last['e20']); e50=float(last['e50']); rsi_v=float(last['rsi'])
-        body=abs(cc-o); rng=h-l
-        if rng<0.00001 or body==0: return None
-        upper=h-max(o,cc); lower=min(o,cc)-l
-        is_green=cc>o; is_red=not is_green
+class OTCWeekendAnalyzer:
+    def __init__(self):
+        self.file = "storico_otc_weekend.json"
+        self.storico = []
+        if os.path.exists(self.file):
+            try:
+                with open(self.file, 'r') as f: self.storico = json.load(f)
+            except: self.storico = []
+    def save(self):
+        try:
+            with open(self.file, 'w') as f: json.dump(self.storico, f, indent=2)
+        except: pass
 
-        # FIX PREZZO: scarta dati sballati
-        is_jpy = "JPY" in display
-        if not is_jpy and (cc>5 or cc<0.5): return None
-        if is_jpy and (cc>300 or cc<50): return None
-
-        # 1.9x PULITA
-        pin_bull = lower > body*1.9 and body < rng*0.42 and upper < body*0.65 and is_green
-        pin_bear = upper > body*1.9 and body < rng*0.42 and lower < body*0.65 and is_red
-        if not (pin_bull or pin_bear): return None
-
-        # SWING 8 invece di 10 - più segnali
-        swing_high = h >= float(df['High'].iloc[-9:-1].max())*0.9998
-        swing_low = l <= float(df['Low'].iloc[-9:-1].min())*1.0002
-        if not (swing_high or swing_low): return None
-
-        # EMA rimbalzo allargato a 0.25%
-        ema_touch_buy = abs(l - e20)/cc < 0.0025 or abs(l - e50)/cc < 0.0025
-        ema_touch_sell = abs(h - e20)/cc < 0.0025 or abs(h - e50)/cc < 0.0025
-        if not (ema_touch_buy or ema_touch_sell): return None
-
-        # RSI allargato per 80% target
-        signal=None; reason=""
-        if pin_bull and swing_low and 25 <= rsi_v <= 52:
-            signal="BUY"; reason=f"1.9x {round(lower/body,1)}x SwingLow RSI{int(rsi_v)} EMA"
-        elif pin_bear and swing_high and 48 <= rsi_v <= 75:
-            signal="SELL"; reason=f"1.9x {round(upper/body,1)}x SwingHigh RSI{int(rsi_v)} EMA"
-        else: return None
-
-        return {"symbol":display,"signal":signal,"price":round(cc,5),"reason":reason,"time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
-    except Exception as e:
-        print(f"ERR {e}")
+    def is_pinbar_otc(self, o,h,l,c):
+        body = abs(c - o)
+        upper = h - max(c,o)
+        lower = min(c,o) - l
+        total = h - l
+        if total == 0 or body == 0: return None
+        if body > total * 0.40: return None
+        score_buy = (lower/total)*100
+        score_sell = (upper/total)*100
+        if lower > body * 1.9 and upper < body * 0.9 and score_buy >= 68 and c > o:
+            return "BUY", round(score_buy,1), round(lower/body,1)
+        if upper > body * 1.9 and lower < body * 0.9 and score_sell >= 68 and c < o:
+            return "SELL", round(score_sell,1), round(upper/body,1)
         return None
 
-def scan_loop():
-    global last_scan
-    time.sleep(6)
-    while True:
-        found=0
-        for sym in OTC_PAIRS:
-            r=analyze_filtered(sym)
-            if r:
-                if not any(x['symbol']==r['symbol'] and time.time()-x['expire_ts']<400 for x in signals_log[-20:]):
-                    signals_log.append(r)
-                    if len(signals_log)>200: signals_log.pop(0)
-                    send(f"🎯 V7.2 {r['signal']} {r['symbol']} {r['price']} {r['reason']}")
-                    found+=1
-        last_scan={"time":datetime.now().strftime("%H:%M:%S"),"found":found,"win_est":"Target 70-75% (filtri bilanciati)"}
-        time.sleep(40)
+    def analyze(self, df, pair_otc):
+        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        df.columns = [c.lower() for c in df.columns]
+        if len(df) < 30: return None
+        last = df.iloc[-2]
+        o,h,l,c = float(last['open']), float(last['high']), float(last['low']), float(last['close'])
+        res = self.is_pinbar_otc(o,h,l,c)
+        if not res: return None
+        signal, score, x_factor = res
+        now = datetime.now(ITALIA)
+        expiry = now + timedelta(minutes=3)
+        if any(s['pair']==pair_otc and abs(s['timestamp']-now.timestamp())<120 for s in self.storico[-15:]): return None
+        segnale = {
+            "pair": pair_otc, "signal": signal, "score": score, "x_factor": x_factor,
+            "prezzo": c,
+            "time_str": now.strftime("%d/%m %H:%M:%S"),
+            "expiry_time": expiry.strftime("%H:%M:%S"),
+            "expiry_full": expiry.strftime("%d/%m %H:%M:%S"),
+            "timestamp": now.timestamp(),
+            "expiry_timestamp": expiry.timestamp(),
+            "timeframe": "1 MIN OTC", "scadenza": "3 MIN", "status": "ATTIVO"
+        }
+        self.storico.append(segnale); self.save()
+        send_telegram(f"🟣 OTC {signal} {pair_otc} 3MIN\nPINBAR {x_factor}x Score {score}%\nENTRATA {segnale['time_str']} IT\nSCAD {segnale['expiry_full']} IT")
+        return segnale
+
+    def get_pending(self):
+        now = datetime.now(ITALIA).timestamp()
+        for s in self.storico:
+            if s['status']=="ATTIVO" and now > s['expiry_timestamp']: s['status']="SCADUTO"
+        self.save()
+        return [s for s in self.storico if s['status']=="ATTIVO" and now - s['timestamp'] < 200]
+    def get_history(self): return self.storico[-50:][::-1]
+
+OTC_MAP = {
+    "EURUSD-OTC": "EURUSD=X",
+    "GBPUSD-OTC": "GBPUSD=X",
+    "USDJPY-OTC": "USDJPY=X",
+    "AUDUSD-OTC": "AUDUSD=X",
+    "USDCAD-OTC": "USDCAD=X",
+    "EURJPY-OTC": "EURJPY=X",
+    "GBPJPY-OTC": "GBPJPY=X",
+    "EURGBP-OTC": "EURGBP=X",
+    "AUDJPY-OTC": "AUDJPY=X",
+    "USDCHF-OTC": "USDCHF=X",
+    "EURUSD2-OTC": "EURUSD=X",
+    "GBPUSD2-OTC": "GBPUSD=X"
+}
+
+app = Flask(__name__)
+analyzer = OTCWeekendAnalyzer()
+scan_count = 0
+pair_index = 0
+last_scan = 0
+last_debug = "OTC WEEKEND ANTI-LAG 5/12"
+
+HTML_PAGE = '''
+<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OTC WEEKEND 5x PINBAR 3MIN</title>
+<style>
+body{background:#0a0614;color:#fff;font-family:Arial;padding:10px;margin:0}
+.top{text-align:center;color:#c084ff;font-size:28px;font-weight:bold;padding:12px;background:#1a102a;border-radius:12px;border:2px solid #a855f7}
+.sub{text-align:center;color:#ffeb00;font-size:12px;margin:6px 0;font-weight:bold}
+.badge{text-align:center;background:#1e142e;padding:8px;border-radius:8px;margin:8px 0;font-size:11px;border:1px solid #3a2a5a}
+.card{border-left:6px solid #a855f7;border-radius:12px;padding:12px;margin-bottom:8px;background:#1f142f}
+.sell{border-left-color:#ff4444;background:#2a141f}
+.otc{color:#c084ff;font-size:10px;font-weight:bold;background:#3a1a5a;padding:3px 6px;border-radius:4px}
+.exp{background:#ffeb00;color:#000;padding:4px 8px;border-radius:5px;font-weight:bold;font-size:13px}
+.r{color:#aaa;font-size:11px;margin-top:5px}
+.old{padding:8px 10px;margin-bottom:4px;background:#161022;color:#777;font-size:11px;display:flex;justify-content:space-between;border-radius:6px;border-left:2px solid #3a2a5a}
+</style></head><body>
+<div class="top" id="clock">00:00:00 ITALIA</div>
+<div class="sub">🟣 OTC WEEKEND - ANTI LAG 5 ALLA VOLTA - PINBAR - 1MIN → 3MIN</div>
+<div class="badge">🟣 LIVE: {{pending|length}} | SCAN: {{scan_count}} | BATCH: {{batch_info}} | {{last_debug}} | {{now_italia}}</div>
+<div style="text-align:center;color:#c084ff;font-size:11px;margin:5px 0">✅ ANTI-LAG: Scansiona 5 coppie ogni 12 sec | Coda 1.9x | Score 68% | Solo Pinbar OTC | 3MIN</div>
+{% for h in pending[::-1] %}
+<div class="card {{'sell' if h.signal=='SELL' else ''}}">
+<div><span class="otc">OTC WEEKEND</span> <b style="font-size:16px">{{h.pair}}</b> <span style="color:{% if h.signal=='BUY' %}#a855f7{% else %}#ff5555{% endif %};font-weight:bold;font-size:16px">{{h.signal}}</span> <span class="exp">SCAD {{h.expiry_time}} IT</span></div>
+<div style="margin:5px 0"><span style="color:#ccc;font-size:11px">{{h.timeframe}} → {{h.scadenza}} | PINBAR {{h.x_factor}}x</span></div>
+<div class="r">⏰ {{h.time_str}} IT | Score {{h.score}}% | {{h.prezzo}} | Storico salvato</div>
+</div>
+{% endfor %}
+{% if pending|length==0 %}
+<div style="text-align:center;color:#555;padding:25px;font-size:13px">🟣 OTC Anti-Lag in attesa...<br>Scansiona 5 coppie alla volta ogni 12 sec<br><span style="font-size:10px">Storico + Suono attivi - Non lagga</span></div>
+{% endif %}
+<div style="margin-top:16px"><h3 style="color:#888;font-size:12px">📜 STORICO 50 OTC - SALVATO</h3>
+{% for h in history %}
+<div class="old"><span><span style="color:#c084ff">{{h.time_str}} IT</span> <b>{{h.pair}}</b> {{h.signal}} PINBAR {{h.x_factor}}x → SCAD {{h.expiry_time}} IT</span><span>{{h.status}} {{h.score}}%</span></div>
+{% endfor %}
+</div>
+<audio id="beep" preload="auto"><source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg"></audio>
+<script>
+function upd(){let now=new Date().toLocaleString('it-IT',{timeZone:'Europe/Rome',hour12:false});document.getElementById('clock').innerText=now+" ITALIA"}setInterval(upd,1000);upd();
+function playSound(){try{let a=document.getElementById('beep');a.volume=1;a.currentTime=0;a.play();let ctx=new(window.AudioContext||window.webkitAudioContext)();for(let i=0;i<3;i++){setTimeout(()=>{let o=ctx.createOscillator();o.frequency.value=900; o.connect(ctx.destination);o.start();setTimeout(()=>o.stop(),350)},i*450)}}catch(e){}}
+if({{pending|length}}>0){setTimeout(playSound,600);setInterval(playSound,3200)}
+setTimeout(()=>location.reload(),12000);
+</script>
+</body></html>
+'''
+
+def do_scan():
+    global scan_count, pair_index, last_scan, last_debug
+    if time.time() - last_scan < 12: return
+    last_scan = time.time(); scan_count += 1
+
+    # ANTI LAG - 5 coppie alla volta
+    all_otc = list(OTC_MAP.items())
+    batch = []
+    for i in range(5):
+        idx = (pair_index + i) % len(all_otc)
+        batch.append(all_otc[idx])
+    pair_index = (pair_index + 5) % len(all_otc)
+
+    f=0
+    batch_names = []
+    for otc_name, real_symbol in batch:
+        batch_names.append(otc_name)
+        try:
+            df = yf.Ticker(real_symbol).history(period="1d", interval="1m", auto_adjust=False)
+            if len(df) < 30: continue
+            res = analyzer.analyze(df, otc_name)
+            if res: f+=1
+        except: continue
+    last_debug = f"OTC:{f} batch {','.join([b[:3] for b in batch_names])} {datetime.now(ITALIA).strftime('%H:%M:%S')}"
 
 @app.route('/')
-def home(): return render_template_string(HTML, logs=signals_log, last=last_scan)
-@app.route('/scan_now')
-def scan_now():
-    res=[]
-    for sym in OTC_PAIRS:
-        r=analyze_filtered(sym)
-        if r: res.append(r); signals_log.append(r)
-    return jsonify(res)
-@app.route('/test_signal')
-def test_signal():
-    # TEST con prezzo giusto
-    sym = random.choice(["EURUSD OTC","GBPUSD OTC","USDJPY OTC","GBPJPY OTC"])
-    is_jpy = "JPY" in sym
-    price = round(random.uniform(195,205),3) if is_jpy else round(random.uniform(1.05,1.35),5)
-    fake={"symbol":sym,"signal":random.choice(["BUY","SELL"]),"price":price,"reason":"TEST V7.2 1.9x FILTRATA OK","time":datetime.now().strftime("%H:%M:%S"),"expire_ts":time.time()+360,"expire_str":(datetime.now()+timedelta(minutes=6)).strftime("%H:%M:%S")}
-    signals_log.append(fake)
-    return jsonify(fake)
-@app.route('/api/signals')
-def api(): return jsonify(signals_log)
+def home():
+    do_scan()
+    all_otc = list(OTC_MAP.keys())
+    start = pair_index
+    batch_info = f"{start+1}-{(start+5)%len(all_otc)} di {len(all_otc)}"
+    return render_template_string(HTML_PAGE, pending=analyzer.get_pending(), history=analyzer.get_history(), scan_count=scan_count, batch_info=batch_info, last_debug=last_debug, now_italia=datetime.now(ITALIA).strftime("%d/%m %H:%M:%S IT"))
 
-threading.Thread(target=scan_loop, daemon=True).start()
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
