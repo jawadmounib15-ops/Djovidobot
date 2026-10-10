@@ -79,9 +79,9 @@ def ultra_signal(sym):
         # ULTRA ALLARGATO - TROVA SICURO
         # 1) RSI semplice
         if r >= 55:
-            return {"pair":name,"side":"SELL","price":round(cc,5 if "JPY" not in name else 3),"why":f"RSI {int(r)} >=55 SELL ULTRA","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
+            return {"pair":name,"side":"SELL","price":round(cc,5 if "JPY" not in name else 3),"why":f"RSI {int(r)} >=65 SELL ULTRA","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
         if r <= 45:
-            return {"pair":name,"side":"BUY","price":round(cc,5 if "JPY" not in name else 3),"why":f"RSI {int(r)} <=45 BUY ULTRA","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
+            return {"pair":name,"side":"BUY","price":round(cc,5 if "JPY" not in name else 3),"why":f"RSI {int(r)} <=35 BUY ULTRA","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
         # 2) Se RSI neutro, guarda EMA
         if cc > e20*1.0005:
             return {"pair":name,"side":"SELL","price":round(cc,5 if "JPY" not in name else 3),"why":f"Sopra EMA20 {round((cc/e20-1)*100,2)}% SELL","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
