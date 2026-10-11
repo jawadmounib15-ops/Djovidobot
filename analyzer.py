@@ -1,57 +1,121 @@
-# Analyzer.py - V13.0 - ULTRA ALLARGATO - 3 MIN - TROVA SICURO
+# Analyzer.py - V15.0 - 5 MIN + 15 COPPIE + SUONO + ANTI-LAG
 import os, time, threading
 from flask import Flask, render_template_string, jsonify
 import yfinance as yf
 import pandas as pd
 from curl_cffi import requests as cffi_requests
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# RIDOTTO A 8 COPPIE PER NON BLOCCARE RENDER
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","GBPJPY=X","EURJPY=X","AUDJPY=X","EURGBP=X","USDCHF=X"]
+# 15 COPPIE - TUTTE OTC FORTI
+PAIRS = [
+    "EURUSD=X","GBPUSD=X","USDJPY=X","GBPJPY=X","EURJPY=X",
+    "AUDJPY=X","EURGBP=X","USDCHF=X","AUDUSD=X","USDCAD=X",
+    "NZDJPY=X","CADJPY=X","GBPAUD=X","EURAUD=X","CHFJPY=X"
+]
 
 app = Flask(__name__)
-_YF = cffi_requests.Session(impersonate="chrome")
+_YF = cffi_requests.Session(impersonate="chrome", timeout=8)
 logs = []
-last_scan = "Avvio V13..."
+last_scan = "V15 Anti-Lag pronto..."
+lock = threading.Lock()
 
 HTML = """
 <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>V13 ULTRA</title>
+<title>V15 5MIN PRO</title>
 <style>
-body{background:#0f172a;color:#fff;font-family:Arial;padding:10px;margin:0}
-.card{background:#1e293b;padding:12px;border-radius:12px;margin:8px 0;border-left:5px solid #22c55e}
-.sell{border-left-color:#ef4444}
-.b{padding:5px 10px;border-radius:6px;font-weight:bold;display:inline-block}
-.bu{background:#22c55e;color:#000}.se{background:#ef4444;color:#fff}
-.t{color:#facc15;font-weight:bold;font-size:16px}
-button{padding:18px;width:100%;border-radius:12px;border:none;font-weight:bold;background:#22c55e;color:#000;font-size:17px;margin:8px 0}
-table{width:100%;font-size:11px;border-collapse:collapse} td,th{padding:6px;border-bottom:1px solid #334155}
-.small{color:#94a3b8;font-size:11px}
+body{background:#08080c;color:#fff;font-family:Arial;padding:10px;margin:0}
+.card{background:#1a1a24;padding:14px;border-radius:14px;margin:8px 0;border-left:5px solid #a855f7;position:relative}
+.sell{border-left-color:#ff3838}
+.bu{padding:6px 12px;border-radius:8px;font-weight:bold;display:inline-block;background:#a855f7;color:#fff}
+.se{padding:6px 12px;border-radius:8px;font-weight:bold;display:inline-block;background:#ff3838;color:#fff}
+.t{color:#facc15;font-weight:bold;font-size:20px}
+button{padding:16px;width:100%;border-radius:14px;border:none;font-weight:bold;color:#fff;font-size:16px;margin:6px 0;cursor:pointer}
+.btn-scan{background:#a855f7} .btn-clear{background:#2a2a3a;font-size:13px;padding:10px}
+.btn-sound{background:#22c55e;color:#000}
+table{width:100%;font-size:11px;border-collapse:collapse} td,th{padding:7px;border-bottom:1px solid #2a2a3a}
+.small{color:#8b8ba7;font-size:11px}
+.livebox{min-height:90px}
+.top{position:sticky;top:0;background:#08080c;z-index:10;padding:5px 0}
 </style></head><body>
-<h2>🟢 V13.0 - ULTRA ALLARGATO 3MIN - TROVA SICURO</h2>
-<div class="card">Trovati: {{logs|length}} | {{last}}<br><span class="small">ULTRA: RSI 55+ SELL / 45- BUY | EMA 0.05% | 8 coppie veloci</span></div>
-<button onclick="fetch('/scan').then(r=>r.json()).then(d=>{location.reload()})">🔍 SCANNA ORA - ULTRA</button>
-<div class="card"><h3>🔴 LIVE 3 MIN</h3><div id="live">Scannerizzo...</div></div>
-<div class="card"><h3>📜 STORICO</h3><table><tr><th>Ora</th><th>Segnale</th><th>Prezzo</th><th>Motivo</th></tr>
-{% for s in logs[::-1][:80] %}
-<tr><td>{{s.time}}</td><td><span class="b {{'bu' if s.side=='BUY' else 'se'}}">{{s.side}} {{s.pair}}</span></td><td>{{s.price}}</td><td>{{s.why}}</td></tr>
+<div class="top">
+<h2 style="margin:5px 0">🔮 V15 PRO - 5 MIN - 15 COPPIE + SUONO</h2>
+<div class="card" style="padding:10px">Trovati: {{logs|length}} | {{last}}<br><span class="small">15 coppie | 3 thread paralleli anti-lag | beep + vibrazione</span></div>
+<button class="btn-scan" onclick="doScan()">⚡ SCANNA ORA (ANTI-LAG)</button>
+<div style="display:flex;gap:6px">
+<button class="btn-sound" style="flex:1" onclick="toggleSound()" id="soundBtn">🔊 SUONO ON</button>
+<button class="btn-clear" style="flex:1" onclick="fetch('/clear').then(()=>location.reload())">🗑️ PULISCI STORICO</button>
+</div>
+</div>
+
+<div class="card"><h3>🔴 LIVE 5 MINUTI - <span id="liveCount">0</span></h3><div id="live" class="livebox">Attivo... scansiono 3 coppie alla volta per non laggare</div></div>
+<div class="card"><h3>📜 STORICO (ultimi 200)</h3><table><tr><th>Ora</th><th>Segnale</th><th>Prezzo</th><th>Motivo</th></tr>
+{% for s in logs[::-1][:200] %}
+<tr><td>{{s.time}}</td><td><span class="{{'bu' if s.side=='BUY' else 'se'}}">{{s.side}} {{s.pair}}</span></td><td>{{s.price}}</td><td class="small">{{s.why}}</td></tr>
 {% endfor %}</table></div>
+
+<audio id="beep" preload="auto">
+  <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
+</audio>
+
 <script>
 let data={{logs|tojson}};
+let soundOn = localStorage.getItem('soundOn') !== 'false';
+let lastIds = new Set(data.map(d=>d.time+d.pair));
+updateSoundBtn();
+
+function updateSoundBtn(){
+  document.getElementById('soundBtn').innerText = soundOn ? '🔊 SUONO ON' : '🔇 SUONO OFF';
+}
+function toggleSound(){
+  soundOn = !soundOn;
+  localStorage.setItem('soundOn', soundOn);
+  updateSoundBtn();
+  if(soundOn){ playBeep(); }
+}
+function playBeep(){
+  if(!soundOn) return;
+  try{
+    document.getElementById('beep').play();
+    if(navigator.vibrate) navigator.vibrate([200,100,200]);
+    // beep di backup con WebAudio
+    let ctx = new (window.AudioContext || window.webkitAudioContext)();
+    let o = ctx.createOscillator(); let g = ctx.createGain();
+    o.frequency.value=900; o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(0.5, ctx.currentTime); o.start(); o.stop(ctx.currentTime+0.3);
+  }catch(e){}
+}
+function doScan(){
+  document.querySelector('.btn-scan').innerText='⏳ SCANNO 15 COPPIE (8 sec)...';
+  fetch('/scan').then(r=>r.json()).then(d=>{
+    if(d.length>0 && soundOn){ playBeep(); }
+    setTimeout(()=>location.reload(),1200);
+  });
+}
 function render(){
- let h=''; let now=Date.now(); let seen={};
+ let h=''; let now=Date.now(); let seen={}; let count=0;
  data.slice().reverse().forEach(s=>{
   let diff=Math.floor((s.exp*1000-now)/1000);
   if(diff>0 && !seen[s.pair]){
-   seen[s.pair]=1;
+   seen[s.pair]=1; count++;
    let m=Math.floor(diff/60); let sec=diff%60;
-   h+=`<div class="card ${s.side=='BUY'?'':'sell'}"><span class="b ${s.side=='BUY'?'bu':'se'}">${s.side} ${s.pair}</span> ${s.price} <span class="t">00:0${m}:${String(sec).padStart(2,'0')}</span><br><span class="small">${s.why}</span></div>`;
+   h+=`<div class="card ${s.side=='BUY'?'':'sell'}"><span class="${s.side=='BUY'?'bu':'se'}">${s.side} ${s.pair}</span> ${s.price} <span class="t">${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}</span><br><span class="small">${s.why} | scade ${s.exp_str}</span></div>`;
   }
  });
- if(!h) h='<small>Clicca SCANNA - trova in 5 sec</small>';
+ document.getElementById('liveCount').innerText=count;
+ if(!h) h='<small style=\"color:#8b8ba7\">Nessun cross adesso - mercato laterale. V15 scanna ogni 25s automatico con anti-lag.</small>';
  document.getElementById('live').innerHTML=h;
 }
-setInterval(()=>{fetch('/api').then(r=>r.json()).then(d=>{data=d; render();})},3000);
+setInterval(()=>{
+  fetch('/api').then(r=>r.json()).then(d=>{
+    let newOnes = d.filter(x=>!lastIds.has(x.time+x.pair));
+    if(newOnes.length>0 && soundOn){
+      playBeep();
+      newOnes.forEach(n=>lastIds.add(n.time+n.pair));
+    }
+    data=d; render();
+  })
+},3000);
 setInterval(render,1000); render();
 </script></body></html>
 """
@@ -59,69 +123,105 @@ setInterval(render,1000); render();
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
     return df
-def rsi(s,p=14):
-    d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
-    return 100-(100/(1+g/l))
 
-def ultra_signal(sym):
+def signal_5min(sym):
     try:
-        name=sym.replace("=X","")+" OTC"
-        # 2m invece di 1m - yfinance su Render va meglio
-        df=fix_df(yf.Ticker(sym, session=_YF).history(period="1d", interval="2m"))
-        if len(df)<30: return None
-        df['e20']=df['Close'].ewm(span=20).mean()
-        df['rsi']=rsi(df['Close'])
-        last=df.iloc[-1]
-        cc=float(last['Close']); e20=float(last['e20']); r=float(last['rsi'])
-        if "JPY" in name and (cc<50 or cc>300): return None
-        if "JPY" not in name and (cc<0.5 or cc>5): return None
-
-        # ULTRA ALLARGATO - TROVA SICURO
-        # 1) RSI semplice
-        if r >= 55:
-            return {"pair":name,"side":"SELL","price":round(cc,5 if "JPY" not in name else 3),"why":f"RSI {int(r)} >=65 SELL ULTRA","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
-        if r <= 45:
-            return {"pair":name,"side":"BUY","price":round(cc,5 if "JPY" not in name else 3),"why":f"RSI {int(r)} <=35 BUY ULTRA","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
-        # 2) Se RSI neutro, guarda EMA
-        if cc > e20*1.0005:
-            return {"pair":name,"side":"SELL","price":round(cc,5 if "JPY" not in name else 3),"why":f"Sopra EMA20 {round((cc/e20-1)*100,2)}% SELL","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
-        if cc < e20*0.9995:
-            return {"pair":name,"side":"BUY","price":round(cc,5 if "JPY" not in name else 3),"why":f"Sotto EMA20 {round((cc/e20-1)*100,2)}% BUY","time":datetime.now().strftime("%H:%M:%S"),"exp":time.time()+180,"exp_str":(datetime.now()+timedelta(minutes=3)).strftime("%H:%M:%S")}
+        name = sym.replace("=X","") + " OTC"
+        df = fix_df(yf.Ticker(sym, session=_YF).history(period="2d", interval="5m"))
+        if len(df) < 50: return None
+        
+        df['ema9'] = df['Close'].ewm(span=9).mean()
+        df['ema21'] = df['Close'].ewm(span=21).mean()
+        
+        c1 = df.iloc[-2]
+        c2 = df.iloc[-1]
+        
+        cc = float(c2['Close']); oo = float(c2['Open'])
+        hi = float(c2['High']); lo = float(c2['Low'])
+        
+        if "JPY" in name and (cc < 50 or cc > 300): return None
+        if "JPY" not in name and (cc < 0.5 or cc > 5): return None
+        
+        body = abs(cc - oo); tr = hi - lo
+        if tr == 0: return None
+        body_perc = (body / tr) * 100
+        if body_perc < 35: return None # filtro doji
+        
+        cross_up = c1['ema9'] < c1['ema21'] and c2['ema9'] > c2['ema21']
+        cross_down = c1['ema9'] > c1['ema21'] and c2['ema9'] < c2['ema21']
+        
+        price_str = round(cc, 5 if "JPY" not in name else 3)
+        now_str = datetime.now().strftime("%H:%M:%S")
+        exp_ts = time.time() + 300
+        exp_str = (datetime.now() + timedelta(minutes=5)).strftime("%H:%M:%S")
+        
+        if cross_up and cc > oo:
+            return {"pair":name,"side":"BUY","price":price_str,"why":f"CROSS UP 9/21 Body {int(body_perc)}%","time":now_str,"exp":exp_ts,"exp_str":exp_str,"sym":sym}
+        if cross_down and cc < oo:
+            return {"pair":name,"side":"SELL","price":price_str,"why":f"CROSS DOWN 9/21 Body {int(body_perc)}%","time":now_str,"exp":exp_ts,"exp_str":exp_str,"sym":sym}
     except Exception as e:
-        print(f"ERR {sym} {e}")
+        print(f"ERR {sym}: {e}")
         return None
     return None
 
 def loop():
     global last_scan
-    time.sleep(4)
+    time.sleep(6)
     while True:
-        found=0
-        for s in PAIRS[:4]: # scanna 4 per volta per non bloccare
-            if any(x['pair'].startswith(s.replace("=X","")) and x['exp']>time.time() for x in logs): continue
-            sig=ultra_signal(s)
-            if sig:
-                logs.append(sig)
-                if len(logs)>150: logs.pop(0)
-                found+=1
-        last_scan=datetime.now().strftime("%H:%M:%S")+f" - trovati {found} - ULTRA"
-        time.sleep(20)
+        try:
+            start = time.time()
+            to_scan = []
+            with lock:
+                for s in PAIRS:
+                    if not any(x.get('sym')==s and x['exp']>time.time() for x in logs):
+                        to_scan.append(s)
+            
+            found = 0
+            # ANTI-LAG: 3 thread paralleli, timeout 8 sec a coppia
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                futs = {ex.submit(signal_5min, sym): sym for sym in to_scan[:9]} # 9 alla volta max
+                for fut in as_completed(futs, timeout=25):
+                    try:
+                        sig = fut.result(timeout=8)
+                        if sig:
+                            with lock:
+                                logs.append(sig)
+                                if len(logs) > 200: logs.pop(0)
+                            found += 1
+                    except: pass
+            
+            elapsed = int(time.time()-start)
+            last_scan = datetime.now().strftime("%H:%M:%S") + f" - {found} segnali - {elapsed}s anti-lag"
+        except Exception as e:
+            last_scan = f"Err loop {e}"
+        time.sleep(25)
 
 @app.route('/')
-def home(): return render_template_string(HTML, logs=logs, last=last_scan)
+def home(): 
+    with lock: return render_template_string(HTML, logs=logs, last=last_scan)
 @app.route('/scan')
 def scan():
     out=[]
-    for s in PAIRS:
-        if any(x['pair'].startswith(s.replace("=X","")) and x['exp']>time.time() for x in logs): continue
-        sig=ultra_signal(s)
-        if sig:
-            logs.append(sig)
-            out.append(sig)
-            if len(out)>=3: break # max 3 per scan per non fare casino
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futs = {ex.submit(signal_5min, s): s for s in PAIRS if not any(x.get('sym')==s and x['exp']>time.time() for x in logs)}
+        for fut in as_completed(futs, timeout=20):
+            try:
+                sig = fut.result(timeout=8)
+                if sig:
+                    with lock:
+                        logs.append(sig)
+                        if len(logs)>200: logs.pop(0)
+                    out.append(sig)
+                    if len(out)>=3: break
+            except: pass
     return jsonify(out)
 @app.route('/api')
-def api(): return jsonify(logs)
+def api(): 
+    with lock: return jsonify(logs)
+@app.route('/clear')
+def clear():
+    with lock: logs.clear()
+    return jsonify({"ok":1})
 
 threading.Thread(target=loop, daemon=True).start()
 if __name__=="__main__":
