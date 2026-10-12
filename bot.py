@@ -6,18 +6,20 @@ import requests
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
-# TOLTE esotiche USDSEK/MXN/NOK che spammavano
+
 PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 
 app = Flask(__name__)
-@app.route('/')
-def home(): return f"V61.1 STRETT0 - {len(PAIRS)} PAIRS - cooldown 90min"
 
-pending=[]
-cooldown={} # nuovo
+@app.route('/')
+def home():
+    return f"V61.2 SOLO SEGNALI - {len(PAIRS)} PAIRS - cooldown 90min - NO CALCOLO RISULTATO"
+
+cooldown={}
 
 def send(msg):
-    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=10)
+    try:
+        requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=10)
     except: pass
 
 def fix_df(df):
@@ -41,68 +43,57 @@ def stochastic(df,k=14,d=3):
 def scan():
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=8: break # MAX 2 segnali per giro, non 6
+        if count_this_scan>=4: # MAX 2 segnali per giro
+            break
+
         clean=symbol.replace("=X","")
-        # COOLDOWN 90 minuti per coppia
-        if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
+        if clean in cooldown and time.time()-cooldown[clean] < 5400: # 90 min
+            continue
+
         try:
             df=yf.download(symbol, period="5d", interval="15m", progress=False)
             df=fix_df(df)
             if len(df)<210: continue
+
             df['e20']=df['Close'].ewm(span=20).mean()
             df['e200']=df['Close'].ewm(span=200).mean()
             df['rsi']=rsi(df['Close'])
             df['atr']=atr(df,14)
             df['atr_ma50']=df['atr'].rolling(50).mean()
             df['stoch_k'],_ = stochastic(df)
+
             last=df.iloc[-1]
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
-            # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
             if last['atr'] < last['atr_ma50']*0.30: continue
             if last['atr'] > last['atr_ma50']*2.2: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.004 # più stretto 0.3% non 0.4%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.004
             dist_e200=abs(price-float(last['e200']))/price
-            if dist_e200 < 0.001: continue # no flat
+            if dist_e200 < 0.001: continue
 
             signal=None
-            # STRETT0: RSI più centrale e stoch più estremo
             if price>float(last['e200']) and tocco_e20 and 64<=rsi_v<=75 and stoch_k<85:
                 signal="BUY"
             if price<float(last['e200']) and tocco_e20 and 20<=rsi_v<=30 and stoch_k>15:
                 signal="SELL"
 
             if signal:
-                if any(p['symbol']==clean for p in pending): continue
-                send(f"🎯 L4 PELO {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} Entry {price:.5f}")
-                pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
+                # MESSAGGIO SENZA CALCOLO RISULTATO
+                send(f"🎯 {signal} {clean}\nRSI {rsi_v:.0f} STO {stoch_k:.0f}\nEntry {price:.5f}\n⏰ Scadenza: 15m / 30m")
                 cooldown[clean]=time.time()
                 count_this_scan+=1
+
         except: continue
 
-def check_results():
-    now=time.time()
-    for p in pending[:]:
-        if now-p['time'] < 60: continue # controlla dopo 2min 
-        try:
-            df=yf.download(p['symbol']+"=X", period="1d", interval="1m", progress=False)
-            df=fix_df(df)
-            if len(df)==0: continue
-            curr=float(df['Close'].iloc[-1])
-            win=(p['signal']=="BUY" and curr>p['entry']) or (p['signal']=="SELL" and curr<p['entry'])
-            # manda solo WIN/LOSS importanti, non spam
-            send(f"{'WIN ✅' if win else 'LOSS ❌'} L4 {p['signal']} {p['symbol']} {((curr-p['entry'])/p['entry']*100):+.2f}%")
-            pending.remove(p)
-        except: pass
-
 def loop():
-    send(f"🚀 V61.1 STRETT0 - {len(PAIRS)} coppie - max 2 segnali/giro - cooldown 90min")
+    send(f"🚀 V61.2 ATTIVO - {len(PAIRS)} coppie - SOLO SEGNALI - scadenza 15/30m")
     while True:
-        try: scan(); check_results()
+        try: scan()
         except: pass
-        time.sleep(60) # scan ogni 1min
+        time.sleep(60)
 
 threading.Thread(target=loop, daemon=True).start()
+
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
