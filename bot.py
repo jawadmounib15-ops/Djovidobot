@@ -41,7 +41,7 @@ def scan():
         if clean in cooldown and time.time()-cooldown[clean]<400: continue
         if any(p['symbol']==clean for p in pending): continue
         try:
-            df=fix_df(yf.Ticker(symbol, session=_YF_SESSION).history(period="2d", interval="2m"))
+            df=fix_df(yf.Ticker(symbol, session=_YF_SESSION).history(period="2d", interval="1m"))
             if len(df)<200: continue
             df['e20']=df['Close'].ewm(span=20).mean()
             df['e50']=df['Close'].ewm(span=50).mean()
@@ -54,8 +54,8 @@ def scan():
             is_green=cc>o; is_red=not is_green
 
             # 1.9x LARGO come hai chiesto
-            pin_bull = lower > body*2.2 and body < rng*0.20 and upper < body*0.80 and is_green
-            pin_bear = upper > body*2.2 and body < rng*0.20 and lower < body*0.80 and is_red
+            pin_bull = lower > body*2.2 and body < rng*0.60 and upper < body*0.80 and is_green
+            pin_bear = upper > body*2.2 and body < rng*0.60 and lower < body*0.80 and is_red
 
             signal=None
             if pin_bull and e20>e50 and 55<=rsi_v<=75:
