@@ -41,7 +41,7 @@ def stochastic(df,k=14,d=3):
 def scan():
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=8: break # MAX 8 segnali per giro, non 20
+        if count_this_scan>=8: break # MAX 2 segnali per giro, non 6
         clean=symbol.replace("=X","")
         # COOLDOWN 90 minuti per coppia
         if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
@@ -59,18 +59,18 @@ def scan():
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
             # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
-            if last['atr'] < last['atr_ma50']*0.40: continue
-            if last['atr'] > last['atr_ma50']*1.8: continue
+            if last['atr'] < last['atr_ma50']*0.70: continue
+            if last['atr'] > last['atr_ma50']*2.2: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.003 # più stretto 0.3% non 0.4%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.004 # più stretto 0.3% non 0.4%
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue # no flat
 
             signal=None
             # STRETT0: RSI più centrale e stoch più estremo
-            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=36 and stoch_k<15:
+            if price>float(last['e200']) and tocco_e20 and 64<=rsi_v<=75 and stoch_k<85:
                 signal="BUY"
-            if price<float(last['e200']) and tocco_e20 and 64<=rsi_v<=75 and stoch_k>85:
+            if price<float(last['e200']) and tocco_e20 and 20<=rsi_v<=30 and stoch_k>15:
                 signal="SELL"
 
             if signal:
@@ -80,6 +80,21 @@ def scan():
                 cooldown[clean]=time.time()
                 count_this_scan+=1
         except: continue
+
+def check_results():
+    now=time.time()
+    for p in pending[:]:
+        if now-p['time'] < 60: continue # controlla dopo 2min 
+        try:
+            df=yf.download(p['symbol']+"=X", period="1d", interval="1m", progress=False)
+            df=fix_df(df)
+            if len(df)==0: continue
+            curr=float(df['Close'].iloc[-1])
+            win=(p['signal']=="BUY" and curr>p['entry']) or (p['signal']=="SELL" and curr<p['entry'])
+            # manda solo WIN/LOSS importanti, non spam
+            send(f"{'WIN ✅' if win else 'LOSS ❌'} L4 {p['signal']} {p['symbol']} {((curr-p['entry'])/p['entry']*100):+.2f}%")
+            pending.remove(p)
+        except: pass
 
 def loop():
     send(f"🚀 V61.1 STRETT0 - {len(PAIRS)} coppie - max 2 segnali/giro - cooldown 90min")
