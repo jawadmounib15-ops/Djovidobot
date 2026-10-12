@@ -41,7 +41,7 @@ def stochastic(df,k=14,d=3):
 def scan():
     count_this_scan=0
     for symbol in PAIRS:
-        if count_this_scan>=2: break # MAX 2 segnali per giro, non 6
+        if count_this_scan>=8: break # MAX 8 segnali per giro, non 20
         clean=symbol.replace("=X","")
         # COOLDOWN 90 minuti per coppia
         if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
@@ -59,10 +59,10 @@ def scan():
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
             # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
-            if last['atr'] < last['atr_ma50']*0.30: continue
+            if last['atr'] < last['atr_ma50']*0.40: continue
             if last['atr'] > last['atr_ma50']*1.8: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.002 # più stretto 0.3% non 0.4%
+            tocco_e20=abs(price-float(last['e20']))/price < 0.003 # più stretto 0.3% non 0.4%
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue # no flat
 
