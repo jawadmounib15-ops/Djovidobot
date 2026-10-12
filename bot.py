@@ -3,19 +3,18 @@ from flask import Flask
 import yfinance as yf
 import pandas as pd
 import requests
-from curl_cffi import requests as cffi_requests
 
-TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", "")).strip()
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","EURJPY=X","EURGBP=X","EURCHF=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","AUDCHF=X","AUDCAD=X","CADCHF=X"]
+TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
+# TOLTE esotiche USDSEK/MXN/NOK che spammavano
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
 
 app = Flask(__name__)
-pending=[]; cooldown={}; _YF_SESSION=cffi_requests.Session(impersonate="chrome")
-bad_pairs={} # coppie che perdono tanto
-
 @app.route('/')
-def home():
-    return f"BOT 1.9x FIX - Pending:{len(pending)} Bad:{bad_pairs}"
+def home(): return f"V61.1 STRETT0 - {len(PAIRS)} PAIRS - cooldown 90min"
+
+pending=[]
+cooldown={} # nuovo
 
 def send(msg):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=10)
@@ -24,59 +23,70 @@ def send(msg):
 def fix_df(df):
     if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
     return df
+
 def rsi(s,p=14):
     d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
     return 100-(100/(1+g/l))
 
-def scan():
-    global pending
-    pending=[p for p in pending if time.time()-p['time']<400]
-    c=0
-    for symbol in PAIRS:
-        if c>=2: break
-        clean=symbol.replace("=X","")
-        # se AUDCAD ha perso 2 volte, stop 30 min
-        if clean in bad_pairs and bad_pairs[clean]>=2 and time.time()-cooldown.get(clean,0)<1800:
-            continue
-        if clean in cooldown and time.time()-cooldown[clean]<400: continue
-        if any(p['symbol']==clean for p in pending): continue
-        try:
-            df=fix_df(yf.Ticker(symbol, session=_YF_SESSION).history(period="2d", interval="1m"))
-            if len(df)<200: continue
-            df['e20']=df['Close'].ewm(span=20).mean()
-            df['e50']=df['Close'].ewm(span=50).mean()
-            df['rsi']=rsi(df['Close'])
-            last=df.iloc[-1]
-            o=float(last['Open']); h=float(last['High']); l=float(last['Low']); cc=float(last['Close'])
-            e20=float(last['e20']); e50=float(last['e50']); rsi_v=float(last['rsi'])
-            body=abs(cc-o); rng=h-l; upper=h-max(o,cc); lower=min(o,cc)-l
-            if rng<0.000005 or body==0: continue
-            is_green=cc>o; is_red=not is_green
+def atr(df,p=14):
+    hl=df['High']-df['Low']; hc=abs(df['High']-df['Close'].shift()); lc=abs(df['Low']-df['Close'].shift())
+    tr=pd.concat([hl,hc,lc],axis=1).max(axis=1)
+    return tr.rolling(p).mean()
 
-            # 1.9x LARGO come hai chiesto
-            pin_bull = lower > body*2.2 and body < rng*0.60 and upper < body*0.80 and is_green
-            pin_bear = upper > body*2.2 and body < rng*0.60 and lower < body*0.80 and is_red
+def stochastic(df,k=14,d=3):
+    lo=df['Low'].rolling(k).min(); hi=df['High'].rolling(k).max()
+    k_perc=100*((df['Close']-lo)/(hi-lo))
+    return k_perc, k_perc.rolling(d).mean()
+
+def scan():
+    count_this_scan=0
+    for symbol in PAIRS:
+        if count_this_scan>=2: break # MAX 2 segnali per giro, non 6
+        clean=symbol.replace("=X","")
+        # COOLDOWN 90 minuti per coppia
+        if clean in cooldown and time.time()-cooldown[clean] < 5400: continue
+        try:
+            df=yf.download(symbol, period="5d", interval="15m", progress=False)
+            df=fix_df(df)
+            if len(df)<210: continue
+            df['e20']=df['Close'].ewm(span=20).mean()
+            df['e200']=df['Close'].ewm(span=200).mean()
+            df['rsi']=rsi(df['Close'])
+            df['atr']=atr(df,14)
+            df['atr_ma50']=df['atr'].rolling(50).mean()
+            df['stoch_k'],_ = stochastic(df)
+            last=df.iloc[-1]
+            price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
+
+            # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
+            if last['atr'] < last['atr_ma50']*0.50: continue
+            if last['atr'] > last['atr_ma50']*1.8: continue
+
+            tocco_e20=abs(price-float(last['e20']))/price < 0.003 # più stretto 0.3% non 0.4%
+            dist_e200=abs(price-float(last['e200']))/price
+            if dist_e200 < 0.001: continue # no flat
 
             signal=None
-            if pin_bull and e20>e50 and 55<=rsi_v<=75:
+            # STRETT0: RSI più centrale e stoch più estremo
+            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=36 and stoch_k<15:
                 signal="BUY"
-            if pin_bear and e20<e50 and 22<=rsi_v<=38:
+            if price<float(last['e200']) and tocco_e20 and 64<=rsi_v<=75 and stoch_k>85:
                 signal="SELL"
 
             if signal:
-                send(f"🎯 1.9x {signal} {clean} ⏰6MIN RSI{int(rsi_v)}\n{cc:.5f}")
-                pending.append({"symbol":clean,"time":time.time()})
+                if any(p['symbol']==clean for p in pending): continue
+                send(f"🎯 L4 PELO {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} Entry {price:.5f}")
+                pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
                 cooldown[clean]=time.time()
-                c+=1
+                count_this_scan+=1
         except: continue
 
 def loop():
-    time.sleep(5)
-    send("🚀 BOT 1.9x FIX AVVIATO - tolto 3.0x, rimesso 1.9x + anti AUDCAD")
+    send(f"🚀 V61.1 STRETT0 - {len(PAIRS)} coppie - max 2 segnali/giro - cooldown 90min")
     while True:
-        try: scan()
+        try: scan(); check_results()
         except: pass
-        time.sleep(45)
+        time.sleep(60) # scan ogni 1min
 
 threading.Thread(target=loop, daemon=True).start()
 if __name__=="__main__":
