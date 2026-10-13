@@ -68,12 +68,12 @@ def scan():
             if last['atr'] < last['atr_ma50']*1.20: continue
             if last['atr'] > last['atr_ma50']*2.8: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.005
+            tocco_e20=abs(price-float(last['e20']))/price < 0.002
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue
 
             signal=None
-            if price>float(last['e200']) and tocco_e20 and 64<=rsi_v<=75 and stoch_k<85:
+            if price>float(last['e200']) and tocco_e20 and 68<=rsi_v<=75 and stoch_k<85:
                 signal="BUY"
             if price<float(last['e200']) and tocco_e20 and 20<=rsi_v<=30 and stoch_k>15:
                 signal="SELL"
