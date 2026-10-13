@@ -7,7 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","GBPJPY=X","EURJPY=X","AUDJPY=X","EURGBP=X","USDCHF=X","AUDUSD=X","USDCAD=X","NZDJPY=X","CADJPY=X","GBPAUD=X","EURAUD=X","CHFJPY=X","GBPCHF=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","GBPJPY=X","EURJPY=X","AUDJPY=X","EURGBP=X","USDCHF=X","AUDUSD=X","USDCAD=X","CADJPY=X","GBPAUD=X","CHFJPY=X","CADCHF=X","AUDCAD=X","EURCHF=X","GBPCHF=X"]
 
 app = Flask(__name__)
 _YF = cffi_requests.Session(impersonate="chrome", timeout=10)
