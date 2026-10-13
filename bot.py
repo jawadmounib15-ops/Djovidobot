@@ -65,7 +65,7 @@ def scan():
             last=df.iloc[-1]
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
-            if last['atr'] < last['atr_ma50']*1.20: continue
+            if last['atr'] < last['atr_ma50']*1.80: continue
             if last['atr'] > last['atr_ma50']*2.0: continue
 
             tocco_e20=abs(price-float(last['e20']))/price < 0.003
@@ -73,7 +73,7 @@ def scan():
             if dist_e200 < 0.001: continue
 
             signal=None
-            if price>float(last['e200']) and tocco_e20 and 68<=rsi_v<=75 and stoch_k<85:
+            if price>float(last['e200']) and tocco_e20 and 65<=rsi_v<=75 and stoch_k<85:
                 signal="BUY"
             if price<float(last['e200']) and tocco_e20 and 20<=rsi_v<=30 and stoch_k>15:
                 signal="SELL"
