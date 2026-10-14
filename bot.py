@@ -47,7 +47,7 @@ def scan():
             break
 
         clean=symbol.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean] < 5400: # 90 min
+        if clean in cooldown and time.time()-cooldown[clean] < 120: # 60 min
             continue
 
         try:
@@ -66,9 +66,9 @@ def scan():
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
             if last['atr'] < last['atr_ma50']*1.60: continue
-            if last['atr'] > last['atr_ma50']*2.8: continue
+            if last['atr'] > last['atr_ma50']*2.2: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.002
+            tocco_e20=abs(price-float(last['e20']))/price < 0.003
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue
 
