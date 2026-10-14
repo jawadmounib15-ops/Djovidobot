@@ -65,10 +65,10 @@ def scan():
             last=df.iloc[-1]
             price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
 
-            if last['atr'] < last['atr_ma50']*1.80: continue
+            if last['atr'] < last['atr_ma50']*1.60: continue
             if last['atr'] > last['atr_ma50']*2.8: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.003
+            tocco_e20=abs(price-float(last['e20']))/price < 0.002
             dist_e200=abs(price-float(last['e200']))/price
             if dist_e200 < 0.001: continue
 
