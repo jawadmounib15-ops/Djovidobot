@@ -1,98 +1,127 @@
-# bot.py - COME VEDI TU A MANO - TROVA TUTTE LE PINBAR
 import os, time, threading
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from flask import Flask
 import yfinance as yf
 import pandas as pd
 import requests
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from curl_cffi import requests as cffi_requests
-from flask import Flask
 
-TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
-PAIRS = ["EURUSD=X","GBPUSD=X","EURGBP=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURCAD=X","GBPCAD=X","GBPAUD=X"]
-_YF = cffi_requests.Session(impersonate="chrome", timeout=20)
+# ========== CONFIG ==========
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","GBPJPY=X","EURJPY=X","AUDJPY=X","EURGBP=X","USDCHF=X","AUDUSD=X","USDCAD=X","NZDJPY=X","CADJPY=X","GBPCHF=X","AUDCAD=X","EURAUD=X","CHFJPY=X"]
 ITALY = ZoneInfo("Europe/Rome")
+_YF = cffi_requests.Session(impersonate="chrome", timeout=15)
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 cooldown = {}
 
-def ora_it(): return datetime.now(ITALY).strftime("%H:%M:%S")
+app = Flask(__name__)
+
+def send_tg(text):
+    print(text)
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Manca TOKEN o CHAT_ID nelle env")
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+    except Exception as e:
+        print("TG error", e)
+
 def fix_df(df):
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     return df
 
-def pinbar_MANUALE(df):
-    # COME GUARDI TU A MANO NELLA FOTO
-    if len(df)<3: return None
-    c = df.iloc[-1]
-    O,H,L,C = float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
-    total = H-L
-    if total <= 0: return None
-    corpo = abs(O-C)
-    if corpo == 0: corpo = total * 0.05
-    inf = min(O,C) - L
-    sup = H - max(O,C)
+# ========== PINBAR PERFETTA 70-80% ==========
+def pinbar_perfetta(o,h,l,c):
+    rng = h - l
+    if rng == 0: return None, 0
+    if rng / c < 0.00008: return None, 0
 
-    # REGOLA MANUALE - COME OCCHIO UMANO
-    # Basta che uno stoppino sia chiaramente più lungo dell'altro
+    body = abs(c - o)
+    upper = h - max(o,c)
+    lower = min(o,c) - l
 
-    # HAMMER / PIN RIALZO - come vedi tu, stoppino sotto lungo
-    if inf > sup * 1.8 and inf > total * 0.35 and corpo < total * 0.50:
-        return {"dir":"SU","target":L+(inf*0.70),"forza":inf/total*100,"tipo":"HAMMER","inf":inf,"sup":sup,"corpo":corpo,"total":total}
+    tail = max(upper, lower)
+    opp = min(upper, lower)
 
-    # SHOOTING STAR / PIN RIBASSO - come in foto EUR/GBP tuo, stoppino sopra lungo
-    if sup > inf * 1.8 and sup > total * 0.35 and corpo < total * 0.50:
-        return {"dir":"GIÙ","target":H-(sup*0.70),"forza":sup/total*100,"tipo":"STAR","inf":inf,"sup":sup,"corpo":corpo,"total":total}
+    if tail / rng < 0.70: return None, 0
+    if body / rng > 0.25: return None, 0
+    if opp / rng > 0.15: return None, 0
 
-    return None
+    if lower > upper:
+        return "BUY", tail / rng
+    else:
+        return "SELL", tail / rng
 
-def send(msg):
-    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg,"parse_mode":"HTML"}, timeout=10)
-    except: pass
+def scan_pair(sym):
+    try:
+        if sym in cooldown and time.time() - cooldown[sym] < 300:
+            return None
 
-def scan_manuale():
-    for symbol in PAIRS:
-        clean = symbol.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean] < 300: continue # 5 min solo
-        try:
-            df1 = fix_df(yf.Ticker(symbol, session=_YF).history(period="1d", interval="1m"))
-            if len(df1) < 20: continue
-            df5 = df1.resample('5min').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna()
-            if len(df5) < 5: continue
+        name = sym.replace("=X","")
+        pair = name[:3]+"/"+name[3:]
 
-            pin = pinbar_MANUALE(df5)
-            if not pin: continue
+        df = fix_df(yf.Ticker(sym, session=_YF).history(period="2d", interval="1m"))
+        if len(df) < 20: return None
 
-            cooldown[clean] = time.time()
-            sig = "CALL" if pin["dir"]=="SU" else "PUT"
+        candle = df.iloc[-2] # ultima chiusa
+        o = float(candle['Open'])
+        h = float(candle['High'])
+        l = float(candle['Low'])
+        c = float(candle['Close'])
 
-            # Calcolo come vedi tu
-            msg = (
-                f"👁️ <b>PINBAR MANUALE</b> 👁️\n"
-                f"Asset: <b>{clean}</b>\n"
-                f"Dir: <b>{sig}</b> {pin['tipo']}\n"
-                f"Scad: <b>5 MIN</b>\n"
-                f"Entry 70%: <code>{pin['target']:.5f}</code>\n"
-                f"Stoppino: {pin['forza']:.0f}% | Corpo: {(pin['corpo']/pin['total']*100):.0f}%\n"
-                f"Ora: {ora_it()}"
-            )
-            send(msg)
-            print(f"[{ora_it()}] MANUALE {clean} {pin['tipo']} forza {pin['forza']:.0f}%")
-        except Exception as e:
-            print(e)
-            continue
+        side, forza = pinbar_perfetta(o,h,l,c)
+        if not side: return None
 
-def loop():
-    send(f"🚀 <b>BOT MANUALE AVVIATO</b>\nTrova TUTTE come vedi tu a mano\nSenza filtri RSI - solo occhio\nOra {ora_it()}")
+        cooldown[sym] = time.time()
+        ora = datetime.now(ITALY).strftime("%H:%M:%S")
+
+        msg = (
+            f"🎯 *PINBAR PERFETTA M1*\n\n"
+            f"💰 *{pair} {side}*\n"
+            f"📏 Ombra {forza*100:.0f}% | Corpo {abs(c-o)/(h-l)*100:.0f}%\n"
+            f"💵 {c:.5f}\n"
+            f"⏰ {ora} IT | ⏳ *5 MIN*\n"
+            f"✅ Entra chiusura M1"
+        )
+        return msg
+    except Exception as e:
+        print(f"Err {sym}: {e}")
+        return None
+
+def bot_loop():
+    time.sleep(3)
+    send_tg("✅ *BOT PINBAR PERFETTA ONLINE*\nOmbra 70-80% | Scadenza 5m | M1")
+    print("BOT AVVIATO")
     while True:
         try:
-            time.sleep(45) # Ogni 45 sec
-            scan_manuale()
-        except:
+            for sym in PAIRS:
+                msg = scan_pair(sym)
+                if msg: send_tg(msg)
+                time.sleep(1)
             time.sleep(10)
+        except Exception as e:
+            print("Loop error", e)
+            time.sleep(20)
 
-threading.Thread(target=loop, daemon=True).start()
-app = Flask(__name__)
 @app.route('/')
-def home(): return f"Manuale {ora_it()} trovate {len(cooldown)}"
+def home():
+    return f"BOT ONLINE {datetime.now(ITALY).strftime('%H:%M:%S')}"
+
+@app.route('/test')
+def test():
+    for sym in PAIRS:
+        m = scan_pair(sym)
+        if m:
+            send_tg(m)
+            return m
+    return "Nessuna pinbar ora - bot in attesa"
+
+threading.Thread(target=bot_loop, daemon=True).start()
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
