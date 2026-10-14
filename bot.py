@@ -1,94 +1,130 @@
+# bot.py FINALE - DOPPIO LAVORO - 70% - TELEGRAM
+# Lavoro 1: 5m analisi -> 5m scadenza
+# Lavoro 2: 1m analisi -> 5m scadenza
 import os, time, threading
-from flask import Flask
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import yfinance as yf
 import pandas as pd
 import requests
+from curl_cffi import requests as cffi_requests
+
+# ===== CONFIG =====
+SCADENZA = 5
+RITRACCIAMENTO = 0.70
+# ==================
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
-# TOLTE esotiche USDSEK/MXN/NOK che spammavano
-PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X","NZDCAD=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","USDCHF=X","NZDUSD=X","EURJPY=X","EURGBP=X","EURCHF=X","EURCAD=X","EURAUD=X","GBPJPY=X","GBPCHF=X","GBPAUD=X","AUDJPY=X","CADJPY=X","CHFJPY=X","NZDJPY=X","AUDCAD=X"]
+_YF = cffi_requests.Session(impersonate="chrome", timeout=15)
+ITALY = ZoneInfo("Europe/Rome")
+cooldown_m5 = {}
+cooldown_m1 = {}
 
-app = Flask(__name__)
-@app.route('/')
-def home(): return f"V61.1 STRETT0 - {len(PAIRS)} PAIRS - cooldown 90min"
-
-pending=[]
-cooldown={} # nuovo
-
+def ora_it(): return datetime.now(ITALY).strftime("%H:%M:%S")
 def send(msg):
-    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg}, timeout=10)
+    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg,"parse_mode":"HTML"}, timeout=10)
     except: pass
 
 def fix_df(df):
-    if isinstance(df.columns, pd.MultiIndex): df.columns=df.columns.get_level_values(0)
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     return df
 
-def rsi(s,p=14):
+def rsi(s, p=7):
     d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
     return 100-(100/(1+g/l))
 
-def atr(df,p=14):
-    hl=df['High']-df['Low']; hc=abs(df['High']-df['Close'].shift()); lc=abs(df['Low']-df['Close'].shift())
-    tr=pd.concat([hl,hc,lc],axis=1).max(axis=1)
-    return tr.rolling(p).mean()
+def pinbar_70(df, tf_name="5m"):
+    if len(df)<25: return None
+    c=df.iloc[-2]; O,H,L,C=float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
+    total=H-L
+    if total<=0: return None
+    avg=(df['High'].iloc[-12:-2]-df['Low'].iloc[-12:-2]).mean()
+    if total<avg*0.85: return None
+    corpo=abs(O-C); inf=min(O,C)-L; sup=H-max(O,C)
+    if corpo>total*0.25: return None
+    if inf>=total*0.65 and sup<=total*0.10:
+        return {"dir":"SU","target":L+(inf*RITRACCIAMENTO),"forza":inf/total*100}
+    if sup>=total*0.65 and inf<=total*0.10:
+        return {"dir":"GIÙ","target":H-(sup*RITRACCIAMENTO),"forza":sup/total*100}
+    return None
 
-def stochastic(df,k=14,d=3):
-    lo=df['Low'].rolling(k).min(); hi=df['High'].rolling(k).max()
-    k_perc=100*((df['Close']-lo)/(hi-lo))
-    return k_perc, k_perc.rolling(d).mean()
+def get_price(sym):
+    try:
+        df=fix_df(yf.Ticker(sym, session=_YF).history(period="1d", interval="1m"))
+        return float(df.iloc[-1]['Close']) if len(df) else None
+    except: return None
 
-def scan():
-    count_this_scan=0
+def scan_tf(timeframe, cooldown_dict, label):
     for symbol in PAIRS:
-        if count_this_scan>=2: break # MAX 2 segnali per giro, non 6
         clean=symbol.replace("=X","")
-        # COOLDOWN 60 minuti per coppia
-        if clean in cooldown and time.time()-cooldown[clean] < 120: continue
+        if clean in cooldown_dict and time.time()-cooldown_dict[clean]<600: continue
         try:
-            df=yf.download(symbol, period="5d", interval="15m", progress=False)
-            df=fix_df(df)
-            if len(df)<210: continue
-            df['e20']=df['Close'].ewm(span=20).mean()
-            df['e200']=df['Close'].ewm(span=200).mean()
-            df['rsi']=rsi(df['Close'])
-            df['atr']=atr(df,14)
-            df['atr_ma50']=df['atr'].rolling(50).mean()
-            df['stoch_k'],_ = stochastic(df)
-            last=df.iloc[-1]
-            price=float(last['Close']); rsi_v=float(last['rsi']); stoch_k=float(last['stoch_k'])
+            period = "5d" if timeframe=="5m" else "2d"
+            df=fix_df(yf.Ticker(symbol, session=_YF).history(period=period, interval=timeframe))
+            if len(df)<25: continue
+            df['rsi7']=rsi(df['Close'],7); last_rsi=float(df['rsi7'].iloc[-2])
+            pin=pinbar_70(df, timeframe)
+            if not pin: continue
+            if pin["dir"]=="SU" and last_rsi>30: continue
+            if pin["dir"]=="GIÙ" and last_rsi<70: continue
 
-            # STRETT0: ATR 0.6 - 2.0x invece di 0.45-3.2
-            if last['atr'] < last['atr_ma50']*0.70: continue
-            if last['atr'] > last['atr_ma50']*2.0: continue
+            target=pin["target"]
+            # attesa 60 sec tocco 70%
+            toccato=False
+            for _ in range(30):
+                time.sleep(2)
+                live=get_price(symbol)
+                if not live: continue
+                if pin["dir"]=="SU" and live<=target*1.0005: toccato=True; break
+                if pin["dir"]=="GIÙ" and live>=target*0.9995: toccato=True; break
+            if not toccato: continue
 
-            tocco_e20=abs(price-float(last['e20']))/price < 0.002 # più stretto 0.3% non 0.4%
-            dist_e200=abs(price-float(last['e200']))/price
-            if dist_e200 < 0.001: continue # no flat
+            cooldown_dict[clean]=time.time()
+            msg=(f"✅ <b>{label} 70%</b> ✅\nAsset: <b>{clean}</b>\nDir: <b>{'SU CALL' if pin['dir']=='SU' else 'GIÙ PUT'}</b>\n"
+                 f"Analisi: <b>{timeframe}</b> | Scad: <b>{SCADENZA} MIN</b>\nEntry 70%: <code>{target:.5f}</code>\n"
+                 f"Forza: {pin['forza']:.0f}% | RSI: {last_rsi:.0f}\nOra: {ora_it()}")
+            send(msg)
+            print(f"[{ora_it()}] {label} {clean} inviato")
+        except Exception as e:
+            print(f"Err {clean} {label}: {e}")
+            continue
 
-            signal=None
-            # STRETT0: RSI più centrale e stoch più estremo
-            if price>float(last['e200']) and tocco_e20 and 20<=rsi_v<=33 and stoch_k<15:
-                signal="BUY"
-            if price<float(last['e200']) and tocco_e20 and 64<=rsi_v<=75 and stoch_k>85:
-                signal="SELL"
-
-            if signal:
-                if any(p['symbol']==clean for p in pending): continue
-                send(f"🎯 L4 PELO {signal} {clean} RSI {rsi_v:.0f} STO {stoch_k:.0f} Entry {price:.5f}")
-                pending.append({"symbol":clean,"signal":signal,"entry":price,"time":time.time()})
-                cooldown[clean]=time.time()
-                count_this_scan+=1
-                
-        except: continue
-
-def loop():
-    send(f"🚀 V61.1 STRETT0 - {len(PAIRS)} coppie - max 2 segnali/giro - cooldown 90min")
+# ===== LOOP LAVORO 1 - 5m =====
+def loop_m5():
     while True:
-        try: scan(); check_results()
-        except: pass
-        time.sleep(60) # scan ogni 1min
+        try:
+            now=datetime.now(ITALY)
+            sleep_sec=(5 - (now.minute % 5))*60 - now.second + 5
+            if sleep_sec<10: sleep_sec+=300
+            time.sleep(sleep_sec)
+            print(f"[{ora_it()}] SCAN M5...")
+            scan_tf("5m", cooldown_m5, "LAVORO 1 [M5]")
+        except Exception as e:
+            print(f"Loop M5 err {e}"); time.sleep(10)
 
-threading.Thread(target=loop, daemon=True).start()
+# ===== LOOP LAVORO 2 - 1m =====
+def loop_m1():
+    while True:
+        try:
+            now=datetime.now(ITALY)
+            sleep_sec=60 - now.second + 2
+            time.sleep(max(1,sleep_sec))
+            scan_tf("1m", cooldown_m1, "LAVORO 2 [M1->5m]")
+        except Exception as e:
+            print(f"Loop M1 err {e}"); time.sleep(10)
+
+threading.Thread(target=loop_m5, daemon=True).start()
+threading.Thread(target=loop_m1, daemon=True).start()
+
+from flask import Flask
+app=Flask(__name__)
+@app.route('/')
+def home(): return f"Doppio Bot M1+M5 70% Scad {SCADENZA}m - {ora_it()}"
+@app.route('/ping')
+def ping(): return "ok"
+
 if __name__=="__main__":
+    send(f"🚀 <b>BOT DOPPIO AVVIATO</b>\nLavoro 1: 5m -> {SCADENZA}m 70%\nLavoro 2: 1m -> {SCADENZA}m 70%\nOra {ora_it()}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
