@@ -54,8 +54,8 @@ def scan_L1():
             df['rsi7']=rsi(df['Close'],7); last_rsi=float(df['rsi7'].iloc[-2])
             pin=pinbar_ALLARGATA(df)
             if not pin: continue
-            if pin["dir"]=="SU" and last_rsi>40: continue
-            if pin["dir"]=="GIÙ" and last_rsi<60: continue
+            if pin["dir"]=="SU" and last_rsi>60: continue
+            if pin["dir"]=="GIÙ" and last_rsi<40: continue
             cooldown1[clean]=time.time()
             sig="CALL" if pin["dir"]=="SU" else "PUT"
             msg=f"✅ <b>L1 ALLARGATA</b> ✅\nAsset: <b>{clean}</b>\nDir: <b>{sig}</b>\nScad: 5 MIN\nEntry: <code>{pin['target']:.5f}</code>\nForza: {pin['forza']:.0f}% | RSI: {last_rsi:.0f}\nOra: {ora_it()}"
