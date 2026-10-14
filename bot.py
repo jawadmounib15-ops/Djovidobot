@@ -1,151 +1,109 @@
+# bot.py - FINALE 1m -> 5m - 80% SETUP
 import os, time, threading
-from flask import Flask
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import yfinance as yf
 import pandas as pd
 import requests
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from curl_cffi import requests as cffi_requests
+from flask import Flask
 
-PAIRS = ["EURUSD=X","GBPUSD=X","EURGBP=X","USDJPY=X","GBPJPY=X","EURJPY=X","AUDJPY=X","USDCHF=X","AUDUSD=X","USDCAD=X","NZDJPY=X","CADJPY=X","GBPCHF=X","EURAUD=X","CHFJPY=X","GBPAUD=X"]
+TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
+PAIRS = ["EURUSD=X","GBPUSD=X","EURGBP=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURCAD=X","GBPCAD=X"]
+_YF = cffi_requests.Session(impersonate="chrome", timeout=20)
 ITALY = ZoneInfo("Europe/Rome")
-_YF = cffi_requests.Session(impersonate="chrome", timeout=15)
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 cooldown = {}
 
-app = Flask(__name__)
-
-def send_tg(text):
-    print(text)
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
-    except Exception as e:
-        print("TG err", e)
-
+def ora_it(): return datetime.now(ITALY).strftime("%H:%M:%S")
+def ora_num(): return datetime.now(ITALY).hour
 def fix_df(df):
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     return df
+def ema(s,p): return s.ewm(span=p).mean()
 
-# ========== PINBAR PERFETTA V3 - COME LE TUE FOTO ==========
-def pinbar_perfetta(o,h,l,c):
-    rng = h - l
-    if rng == 0: return None, 0
-    body = abs(c - o)
-    upper = h - max(o,c)
-    lower = min(o,c) - l
-    tail = max(upper, lower)
-    opp = min(upper, lower)
+def pinbar_1m_precisa(df):
+    if len(df)<70: return None
 
-    # 1. Ombra 72%+ (le tue erano 75-80)
-    if tail / rng < 0.72: return None, 0
-    # 2. Corpo piccolo 22% max
-    if body / rng > 0.22: return None, 0
-    # 3. Ombra opposta max 10% - quasi nulla
-    if opp / rng > 0.10: return None, 0
-    # 4. Colore giusto obbligatorio
-    if lower > upper and c <= o: return None, 0 # BUY deve essere verde
-    if upper > lower and c >= o: return None, 0 # SELL deve essere rosso
+    # Pinbar è penultima, conferma è ultima (1 candela dopo)
+    pin_c = df.iloc[-2]
+    conf_c = df.iloc[-1]
 
-    if lower > upper:
-        return "BUY", tail / rng
-    else:
-        return "SELL", tail / rng
+    O,H,L,C = float(pin_c['Open']),float(pin_c['High']),float(pin_c['Low']),float(pin_c['Close'])
+    total = H-L
+    if total<=0: return None
+    corpo = abs(O-C)
+    if corpo==0: corpo = total*0.05
+    inf = min(O,C)-L
+    sup = H-max(O,C)
 
-def scan_pair(sym):
-    try:
-        if sym in cooldown and time.time() - cooldown[sym] < 1800: # 30 min stop per coppia
-            return None
+    is_hammer = (inf >= corpo*2.0 and inf >= total*0.50 and sup <= total*0.30 and corpo <= total*0.40)
+    is_star = (sup >= corpo*2.0 and sup >= total*0.50 and inf <= total*0.30 and corpo <= total*0.40)
+    if not (is_hammer or is_star): return None
 
-        name = sym.replace("=X","")
-        pair = name[:3]+"/"+name[3:]
+    ema20 = float(df['ema20'].iloc[-2])
+    ema50 = float(df['ema50'].iloc[-2])
+    last_20_high = df['High'].iloc[-22:-2].max()
+    last_20_low = df['Low'].iloc[-22:-2].min()
 
-        # M5 - NON M1! M1 sono tutti falsi come hai visto
-        df = fix_df(yf.Ticker(sym, session=_YF).history(period="5d", interval="5m"))
-        if len(df) < 100: return None
+    # FILTRO SR
+    tocca_sr = (L <= last_20_low*1.0005) if is_hammer else (H >= last_20_high*0.9995)
+    if not tocca_sr: return None
 
-        df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-        # RSI 7 come da tua regola
-        delta = df['Close'].diff()
-        gain = delta.where(delta>0,0).ewm(alpha=1/7, adjust=False).mean()
-        loss = -delta.where(delta<0,0).ewm(alpha=1/7, adjust=False).mean()
-        df['RSI'] = 100 - (100/(1+gain/loss))
+    # CONFERMA - candela dopo va nella direzione
+    if is_hammer and float(conf_c['Close']) <= float(conf_c['Open']): return None # Vuoi verde
+    if is_star and float(conf_c['Close']) >= float(conf_c['Open']): return None # Vuoi rossa
 
-        c = df.iloc[-2] # ultima chiusa
-        o = float(c['Open']); h = float(c['High']); l = float(c['Low']); close = float(c['Close'])
-        ema = float(c['EMA20']); rsi = float(df.iloc[-2]['RSI'])
+    # FILTRO ORARIO 08-22 Italia
+    h = ora_num()
+    if h < 8 or h > 22: return None
 
-        side, forza = pinbar_perfetta(o,h,l,close)
-        if not side: return None
+    dir = "SU" if is_hammer else "GIÙ"
+    tipo = "HAMMER" if is_hammer else "STAR"
+    entry_50 = (H + L) / 2 # Entry al 50% pinbar
+    forza = (inf if is_hammer else sup)/total*100
 
-        # ========== FILTRO LIVELLO - FONDAMENTALE ==========
-        # Deve essere su supporto/resistenza o tocco EMA20
-        lowest_20 = float(df['Low'].iloc[-20:].min())
-        highest_20 = float(df['High'].iloc[-20:].max())
+    return {"dir":dir,"tipo":tipo,"entry50":entry_50,"target_old":L+(inf*0.70) if is_hammer else H-(sup*0.70),"forza":forza}
 
-        is_support = (l <= lowest_20 * 1.0005) or (abs(l - ema) / close < 0.001)
-        is_resist = (h >= highest_20 * 0.9995) or (abs(h - ema) / close < 0.001)
+def send(msg):
+    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg,"parse_mode":"HTML"}, timeout=10)
+    except: pass
 
-        if side == "BUY":
-            if not is_support: return None # scarta se non è su supporto
-            if rsi > 42: return None # RSI deve essere basso, uscita da <30
-        else: # SELL
-            if not is_resist: return None
-            if rsi < 58: return None # RSI deve essere alto
-
-        cooldown[sym] = time.time()
-        ora = datetime.now(ITALY).strftime("%H:%M:%S")
-
-        msg = (
-            f"🎯 *PINBAR VERA M5*\n\n"
-            f"💰 *{pair} {side}*\n"
-            f"📏 Ombra {forza*100:.0f}% | Corpo {abs(close-o)/(h-l)*100:.0f}% | RSI {rsi:.0f}\n"
-            f"📍 {'Supporto' if side=='BUY' else 'Resistenza'} + EMA20\n"
-            f"💵 {close:.5f}\n"
-            f"⏰ {ora} IT | ⏳ *5 MIN*\n"
-            f"✅ Scadenza prossima M5"
-        )
-        return msg
-    except Exception as e:
-        print(f"Err {sym} {e}")
-        return None
-
-def bot_loop():
-    time.sleep(5)
-    send_tg("✅ *BOT V3 PINBAR VERA ONLINE*\nM5 | Ombra 72%+ | Solo su supporto/resistenza | RSI 7 | Max 1 ogni 30m")
-    print("BOT V3 AVVIATO")
-    while True:
+def scan():
+    for symbol in PAIRS:
+        clean = symbol.replace("=X","")
+        if clean in cooldown and time.time()-cooldown[clean] < 600: continue
         try:
-            for sym in PAIRS:
-                m = scan_pair(sym)
-                if m:
-                    send_tg(m)
-                time.sleep(1.2)
-            time.sleep(30)
-        except Exception as e:
-            print("Loop err", e)
-            time.sleep(30)
+            df = fix_df(yf.Ticker(symbol, session=_YF).history(period="1d", interval="1m"))
+            if len(df)<70: continue
+            df['ema20']=ema(df['Close'],20); df['ema50']=ema(df['Close'],50)
+            pin = pinbar_1m_precisa(df)
+            if not pin: continue
+            cooldown[clean]=time.time()
+            sig = "CALL" if pin["dir"]=="SU" else "PUT"
+            msg = (
+                f"💎 <b>PIN 1m -> 5m 80%</b> 💎\n"
+                f"Asset: <b>{clean}</b>\n"
+                f"Dir: <b>{sig}</b> {pin['tipo']}\n"
+                f"Analisi 1m | Scad <b>5 MIN</b>\n"
+                f"Entry 50%: <code>{pin['entry50']:.5f}</code>\n"
+                f"Entry 70%: <code>{pin['target_old']:.5f}</code>\n"
+                f"Forza {pin['forza']:.0f}% | SR+EMA+CONF+ORARIO\n"
+                f"Ora: {ora_it()}"
+            )
+            send(msg)
+            print(f"[{ora_it()}] FINALE {clean} {pin['tipo']}")
+        except: continue
 
+def loop():
+    send(f"🚀 <b>BOT FINALE 80% AVVIATO</b>\n1m analisi -> 5m scadenza\nFiltri: SR + EMA + Conferma + 08-22\nEntry 50% | No RSI\nOra {ora_it()}")
+    while True:
+        try: time.sleep(35); scan()
+        except: time.sleep(10)
+
+threading.Thread(target=loop, daemon=True).start()
+app=Flask(__name__)
 @app.route('/')
-def home():
-    return f"BOT V3 ONLINE {datetime.now(ITALY).strftime('%H:%M:%S')}"
-
-@app.route('/test')
-def test():
-    for sym in PAIRS:
-        m = scan_pair(sym)
-        if m:
-            send_tg(m)
-            return m
-    return "Nessuna pinbar vera ora - aspetta livello giusto"
-
-threading.Thread(target=bot_loop, daemon=True).start()
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+def home(): return f"Finale {ora_it()}"
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
