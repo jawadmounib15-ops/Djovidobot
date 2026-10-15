@@ -32,8 +32,8 @@ def pinbar_anti_falsi(df):
     forza = (inf if inf>sup else sup)/total*100
 
     # PINBAR: leggermente stretto per anti-falsi
-    is_hammer = (inf >= corpo*1.5 and inf >= total*0.42 and sup <= total*0.38 and corpo <= total*0.50)
-    is_star = (sup >= corpo*1.5 and sup >= total*0.42 and inf <= total*0.38 and corpo <= total*0.50)
+    is_hammer = (inf >= corpo*1.6 and inf >= total*0.45 and sup <= total*0.45 and corpo <= total*0.50)
+    is_star = (sup >= corpo*1.6 and sup >= total*0.45 and inf <= total*0.45 and corpo <= total*0.50)
     if not (is_hammer or is_star): return None
     if forza < 62: return None # prima 55% -> ora 62%
 
