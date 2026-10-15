@@ -1,4 +1,4 @@
-# bot.py - STRETTO +1 PELO - da 62% a 64%
+# bot.py - STRETTO +2 PELO - 66% + coppie richieste
 import os, time, threading
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -8,6 +8,8 @@ from flask import Flask
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
+
+# COPPIE COME RICHIESTO DA TE
 PAIRS = ["EURUSD=X","GBPUSD=X","EURGBP=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","CHFJPY=X","USDCAD=X","USDCHF=X","EURCHF=X","CADJPY=X","CADCHF=X","AUDCHF=X","AUDCAD=X","GBPCAD=X"]
 
 _YF = cffi_requests.Session(impersonate="chrome", timeout=20)
@@ -21,7 +23,7 @@ def fix_df(df):
     return df
 def ema(s,p): return s.ewm(span=p).mean()
 
-def pinbar_pelo(df):
+def pinbar_stretto(df):
     if len(df)<80: return None
     pin_c, conf_c = df.iloc[-2], df.iloc[-1]
     O,H,L,C = float(pin_c['Open']),float(pin_c['High']),float(pin_c['Low']),float(pin_c['Close'])
@@ -31,20 +33,19 @@ def pinbar_pelo(df):
     inf, sup = min(O,C)-L, H-max(O,C)
     forza = (inf if inf>sup else sup)/total*100
 
-    # PRIMA: 1.5x 42% sup 35% corpo 52% forza 62%
-    # ORA +1 PELO: 1.55x 44% sup 33% corpo 50% forza 64%
-    is_hammer = (inf >= corpo*1.55 and inf >= total*0.44 and sup <= total*0.33 and corpo <= total*0.50)
-    is_star = (sup >= corpo*1.55 and sup >= total*0.44 and inf <= total*0.33 and corpo <= total*0.50)
+    # +2 PELO: prima 1.55x 44% sup 33% corpo 50% forza 64%
+    # ora: 1.65x 46% sup 31% corpo 46% forza 66%
+    is_hammer = (inf >= corpo*1.65 and inf >= total*0.46 and sup <= total*0.31 and corpo <= total*0.46)
+    is_star = (sup >= corpo*1.65 and sup >= total*0.46 and inf <= total*0.31 and corpo <= total*0.46)
     if not (is_hammer or is_star): return None
-    if forza < 64: return None # +2%
+    if forza < 66: return None
 
-    # SR: prima 0.15% -> ora 0.13% (-0.02%)
+    # SR 0.13% -> 0.11%
     last_30_high = df['High'].iloc[-32:-2].max()
     last_30_low = df['Low'].iloc[-32:-2].min()
-    tocca_sr = (L <= last_30_low*1.0013) if is_hammer else (H >= last_30_high*0.9987)
+    tocca_sr = (L <= last_30_low*1.0011) if is_hammer else (H >= last_30_high*0.9989)
     if not tocca_sr: return None
 
-    # TREND: uguale
     ema20 = float(df['ema20'].iloc[-2])
     ema50 = float(df['ema50'].iloc[-2])
     ema20_prev = float(df['ema20'].iloc[-6])
@@ -53,16 +54,15 @@ def pinbar_pelo(df):
     else:
         if ema20 < ema50*0.999 and ema20 <= ema20_prev: return None
 
-    # CONFERMA: prima 50% -> ora 55% (+5%)
-    entry_50 = (H+L)/2
-    entry_55_su = L + total*0.55
-    entry_55_giu = H - total*0.55
-    if is_hammer and float(conf_c['Close']) < entry_55_su: return None
-    if is_star and float(conf_c['Close']) > entry_55_giu: return None
+    # CONF 55% -> 60%
+    if is_hammer and float(conf_c['Close']) < L + total*0.60: return None
+    if is_star and float(conf_c['Close']) > H - total*0.60: return None
+    if is_hammer and float(conf_c['Close']) <= float(conf_c['Open']): return None
+    if is_star and float(conf_c['Close']) >= float(conf_c['Open']): return None
 
     if ora_num() < 8 or ora_num() > 22: return None
 
-    return {"dir":"SU" if is_hammer else "GIÙ","tipo":"HAMMER" if is_hammer else "STAR","entry50":entry_50,"forza":forza}
+    return {"dir":"SU" if is_hammer else "GIÙ","tipo":"HAMMER" if is_hammer else "STAR","entry50":(H+L)/2,"forza":forza}
 
 def send(m):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":m,"parse_mode":"HTML"}, timeout=10)
@@ -73,24 +73,24 @@ def scan():
     for s in PAIRS:
         if trovati>=2: break
         clean=s.replace("=X","")
-        if clean in cooldown and time.time()-cooldown[clean] < 480: continue
+        if clean in cooldown and time.time()-cooldown[clean] < 600: continue
         try:
             import yfinance as yf
             df = fix_df(yf.Ticker(s, session=_YF).history(period="1d", interval="1m"))
             if len(df)<80: continue
             df['ema20']=ema(df['Close'],20)
             df['ema50']=ema(df['Close'],50)
-            pin = pinbar_pelo(df)
+            pin = pinbar_stretto(df)
             if not pin: continue
             cooldown[clean]=time.time()
             sig = "CALL" if pin["dir"]=="SU" else "PUT"
-            send(f"💎 <b>PIN +1 PELO 64%</b> 💎\nAsset: <b>{clean}</b> {pin['tipo']}\nDir: <b>{sig}</b> | Forza {pin['forza']:.0f}%\nEntry: <code>{pin['entry50']:.5f}</code>\n{ora_it()}")
+            send(f"💎 <b>PIN +2 PELO 66%</b> 💎\nAsset: <b>{clean}</b> {pin['tipo']}\nDir: <b>{sig}</b> Forza {pin['forza']:.0f}%\nEntry: <code>{pin['entry50']:.5f}</code>\nSR 0.11% + Trend + Conf 60%\n{ora_it()}")
             print(f"SEGNALE {clean} {pin['forza']:.0f}%", flush=True)
             trovati+=1
         except: continue
 
 def loop():
-    send(f"🚀 <b>STRETTO +1 PELO AVVIATO</b>\n64% Forza (prima 62%)\nPin 1.55x 44% (prima 1.5x 42%)\nSR 0.13% (prima 0.15%)\nConf 55% (prima 50%)\nOra {ora_it()}")
+    send(f"🚀 <b>STRETTO +2 PELO 66% AVVIATO</b>\nPin 1.65x 46% Forza 66%\nSR 0.11% Conf 60%\nCoppie: {len(PAIRS)}\nOra {ora_it()}")
     while True:
         try: scan(); time.sleep(40)
         except: time.sleep(10)
@@ -98,5 +98,5 @@ def loop():
 threading.Thread(target=loop, daemon=True).start()
 app=Flask(__name__)
 @app.route('/')
-def home(): return f"+1 PELO 64% {ora_it()}"
+def home(): return f"+2 PELO 66% {ora_it()} - {len(PAIRS)} pairs"
 if __name__=="__main__": app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
