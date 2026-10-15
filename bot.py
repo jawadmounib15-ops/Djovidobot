@@ -33,12 +33,12 @@ def pinbar_1m_precisa(df):
     total = H-L
     if total<=0: return None
     corpo = abs(O-C)
-    if corpo==0: corpo = total*0.05
+    if corpo==0: corpo = total*0.03
     inf = min(O,C)-L
     sup = H-max(O,C)
 
-    is_hammer = (inf >= corpo*2.0 and inf >= total*0.40 and sup <= total*0.20 and corpo <= total*0.40)
-    is_star = (sup >= corpo*2.0 and sup >= total*0.40 and inf <= total*0.20 and corpo <= total*0.40)
+    is_hammer = (inf >= corpo*2.0 and inf >= total*0.30 and sup <= total*0.20 and corpo <= total*0.30)
+    is_star = (sup >= corpo*2.0 and sup >= total*0.30 and inf <= total*0.20 and corpo <= total*0.30)
     if not (is_hammer or is_star): return None
 
     ema20 = float(df['ema20'].iloc[-2])
@@ -63,7 +63,7 @@ def pinbar_1m_precisa(df):
     entry_50 = (H + L) / 2 # Entry al 50% pinbar
     forza = (inf if is_hammer else sup)/total*100
 
-    return {"dir":dir,"tipo":tipo,"entry50":entry_50,"target_old":L+(inf*0.70) if is_hammer else H-(sup*0.70),"forza":forza}
+    return {"dir":dir,"tipo":tipo,"entry50":entry_50,"target_old":L+(inf*0.60) if is_hammer else H-(sup*0.60),"forza":forza}
 
 def send(msg):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":msg,"parse_mode":"HTML"}, timeout=10)
