@@ -32,8 +32,8 @@ def pinbar_medio(df):
 
     # MEDIO: via di mezzo
     # Originale 2.0x 50% / Ultra 1.2x 35% / MEDIO 1.5x 42%
-    is_hammer = (inf >= corpo*1.5 and inf >= total*0.42 and sup <= total*0.35 and corpo <= total*0.52)
-    is_star = (sup >= corpo*1.5 and sup >= total*0.42 and inf <= total*0.35 and corpo <= total*0.52)
+    is_hammer = (inf >= corpo*1.4 and inf >= total*0.40 and sup <= total*0.40 and corpo <= total*0.55)
+    is_star = (sup >= corpo*1.4 and sup >= total*0.40 and inf <= total*0.40 and corpo <= total*0.55)
     if not (is_hammer or is_star): return None
 
     forza = (inf if is_hammer else sup)/total*100
@@ -42,7 +42,7 @@ def pinbar_medio(df):
     # SR MEDIO 0.15% - obbligatorio, niente bypass
     last_20_high = df['High'].iloc[-22:-2].max()
     last_20_low = df['Low'].iloc[-22:-2].min()
-    tocca_sr = (L <= last_20_low*1.0015) if is_hammer else (H >= last_20_high*0.9985)
+    tocca_sr = (L <= last_20_low*1.0020) if is_hammer else (H >= last_20_high*0.9980)
     if not tocca_sr: return None
 
     # EMA - ritorna, ma largo
