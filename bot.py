@@ -37,8 +37,8 @@ def pinbar_1m_precisa(df):
     inf = min(O,C)-L
     sup = H-max(O,C)
 
-    is_hammer = (inf >= corpo*2.0 and inf >= total*0.50 and sup <= total*0.30 and corpo <= total*0.40)
-    is_star = (sup >= corpo*2.0 and sup >= total*0.50 and inf <= total*0.30 and corpo <= total*0.40)
+    is_hammer = (inf >= corpo*2.0 and inf >= total*0.40 and sup <= total*0.20 and corpo <= total*0.40)
+    is_star = (sup >= corpo*2.0 and sup >= total*0.40 and inf <= total*0.20 and corpo <= total*0.40)
     if not (is_hammer or is_star): return None
 
     ema20 = float(df['ema20'].iloc[-2])
