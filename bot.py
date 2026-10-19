@@ -1,10 +1,28 @@
-import os, asyncio, ccxt
-from telegram import Bot
+import os, sys, subprocess
+# AUTO-INSTALL se manca ccxt su Render - PER UN FILE UNICO
+try:
+    import ccxt
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "ccxt"])
+    import ccxt
+
+try:
+    from telegram import Bot
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "python-telegram-bot"])
+    from telegram import Bot
+
+import asyncio
 from dotenv import load_dotenv
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+if not TOKEN or not CHAT_ID:
+    print("ERRORE: manca TELEGRAM_TOKEN o TELEGRAM_CHAT_ID nelle variabili di Render")
+    sys.exit(1)
+
 exchange = ccxt.binance()
 
 def is_pinbar_pulita(o,h,l,c):
@@ -24,6 +42,7 @@ def is_pinbar_pulita(o,h,l,c):
 
 async def main():
     bot = Bot(token=TOKEN)
+    print("Bot avviato - cerco su 1H / 4H / 1D")
     coppie = [s for s in exchange.load_markets() if s.endswith('/USDT')][:25]
     TIMEFRAMES = ['1h', '4h', '1d']
 
@@ -34,7 +53,6 @@ async def main():
                 chiusure = [x[4] for x in kl]
                 o,h,l,c = kl[-1][1], kl[-1][2], kl[-1][3], kl[-1][4]
 
-                # Filtro 2 e 6
                 ema200 = sum(chiusure[-200:])/200
                 gains=[max(chiusure[i]-chiusure[i-1],0) for i in range(1,len(chiusure))]
                 losses=[max(-(chiusure[i]-chiusure[i-1]),0) for i in range(1,len(chiusure))]
@@ -47,13 +65,11 @@ async def main():
                 if tipo=="BULLISH" and (c < ema200 or rsi>70): continue
                 if tipo=="BEARISH" and (c > ema200 or rsi<30): continue
 
-                # Filtro 1 Location
                 max20 = max([x[2] for x in kl[-20:-1]])
                 min20 = min([x[3] for x in kl[-20:-1]])
                 vicino_livello = abs(c-max20)/c < 0.025 or abs(c-min20)/c < 0.025
                 if not vicino_livello: continue
 
-                # Scadenza + SL/TP
                 if tf == '1h': scadenza = "2-3H (2-3 candele)"
                 elif tf == '4h': scadenza = "8-12H (2-3 candele)"
                 else: scadenza = "2-3 Giorni"
@@ -69,25 +85,18 @@ async def main():
 
                 msg = (
                     f"✅ PINBAR PULITA {tipo} {sim} {tf.upper()}\n\n"
-                    f"📍 Prezzo: {c}\n"
-                    f"📍 Tipo: {tipo} - {tf}\n\n"
-                    f"📊 FILTRI 7/7 PASSATI:\n"
-                    f"✓ Trend: {'Sopra' if c>ema200 else 'Sotto'} EMA200 ({ema200:.2f})\n"
-                    f"✓ Location: Vicino livello 20 candele\n"
-                    f"✓ Forma: Corpo {forma_pct:.1f}% | Wick {wick_ratio:.1f}x\n"
-                    f"✓ RSI: {rsi:.1f}\n"
-                    f"✓ Spazio pulito: OK\n"
-                    f"✓ Timeframe lungo: {tf}\n"
-                    f"✓ Chiusura confermata: OK\n\n"
+                    f"📍 Prezzo: {c}\n📍 Timeframe: {tf}\n\n"
+                    f"📊 FILTRI 7/7:\n"
+                    f"✓ Trend EMA200: {ema200:.2f}\n"
+                    f"✓ Forma: {forma_pct:.1f}% corpo | Wick {wick_ratio:.1f}x\n"
+                    f"✓ RSI: {rsi:.1f}\n✓ Location: vicino livello\n✓ Spazio: OK\n\n"
                     f"⏰ SCADENZA: {scadenza}\n"
-                    f"🛡️ SL: {sl:.2f}\n"
-                    f"🎯 TP1 (1:2): {tp1:.2f}\n"
-                    f"🎯 TP2 (1:3): {tp2:.2f}"
+                    f"🛡️ SL: {sl:.2f}\n🎯 TP1: {tp1:.2f}\n🎯 TP2: {tp2:.2f}"
                 )
                 await bot.send_message(chat_id=CHAT_ID,text=msg)
                 await asyncio.sleep(1.2)
             except Exception as e:
-                print(f"{sim} {tf} error {e}")
+                print(f"{sim} {tf} {e}")
                 continue
 
 if __name__=="__main__":
