@@ -1,95 +1,139 @@
-import os, sys, subprocess, asyncio
+# bot.py - PINBAR LARGO 1H+4H - DETTAGLI COMPLETI
+import os, time, threading
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import pandas as pd, requests
+from curl_cffi import requests as cffi_requests
+from flask import Flask
 
-# --- AUTO-INSTALL TUTTO PER RENDER (1 file unico) ---
-def install_and_import(package, import_name=None):
+TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
+PAIRS = ["EURUSD=X","GBPUSD=X","EURGBP=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","CHFJPY=X","USDCAD=X","USDCHF=X","EURCHF=X"]
+
+FORZA_MIN, FORZA_MAX = 60, 92
+RSI_BUY_MIN, RSI_BUY_MAX = 20, 45
+RSI_SELL_MIN, RSI_SELL_MAX = 55, 80
+WICK_RATIO, CORPO_MAX = 1.5, 0.40
+
+TFS = {
+    "1H": {"interval":"60m","range":"15d","scad_min":120,"label":"2H","cool":3600},
+    "4H": {"interval":"60m","range":"30d","scad_min":480,"label":"8H","resample":"4H","cool":10800},
+}
+
+ITALY = ZoneInfo("Europe/Rome")
+cooldown = {}; lock = threading.Lock()
+stats = {"1H":0,"4H":0}
+
+def ora_it(): return datetime.now(ITALY).strftime("%H:%M:%S %d/%m")
+def scadenza_it(m): return (datetime.now(ITALY)+timedelta(minutes=m)).strftime("%H:%M:%S %d/%m")
+def ema(s,p): return s.ewm(span=p).mean()
+def rsi(s,p=14):
+    d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
+    return 100-(100/(1+g/l))
+def atr(df,p=14):
+    hl=df['High']-df['Low']; hc=abs(df['High']-df['Close'].shift()); lc=abs(df['Low']-df['Close'].shift())
+    tr=pd.concat([hl,hc,lc],axis=1).max(axis=1)
+    return tr.rolling(p).mean()
+
+def get_df(sym, interval, range_str, resample=None):
     try:
-        if import_name:
-            __import__(import_name)
-        else:
-            __import__(package)
-    except ImportError:
-        print(f"Installo {package}...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+        with lock:
+            url=f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={interval}&range={range_str}"
+            r=cffi_requests.get(url, impersonate="chrome120", timeout=10)
+            q=r.json()['chart']['result'][0]['indicators']['quote'][0]
+            df=pd.DataFrame({'Open':q['open'],'High':q['high'],'Low':q['low'],'Close':q['close']}).dropna()
+            if len(df)<60: return pd.DataFrame()
+            if resample=="4H":
+                df=df.set_index(pd.date_range(end=datetime.now(), periods=len(df), freq='H')).resample('4H').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna().reset_index(drop=True)
+            return df.tail(200)
+    except: return pd.DataFrame()
 
-install_and_import("ccxt")
-install_and_import("python-telegram-bot", "telegram")
+def send(m):
+    try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":m,"parse_mode":"HTML"}, timeout=8)
+    except: pass
 
-import ccxt
-from telegram import Bot
+def lavoro_pinbar_dettagli():
+    print("PINBAR DETTAGLI avviato", flush=True)
+    while True:
+        try:
+            for tf_name, cfg in TFS.items():
+                for sym in PAIRS:
+                    clean=sym.replace("=X","")
+                    key=f"{clean}_{tf_name}"
+                    if key in cooldown and time.time()-cooldown[key]<cfg["cool"]: continue
+                    df=get_df(sym, cfg["interval"], cfg["range"], cfg.get("resample"))
+                    if len(df)<60: continue
+                    df['ema20']=ema(df['Close'],20); df['ema50']=ema(df['Close'],50); df['ema200']=ema(df['Close'],200)
+                    df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma']=df['atr'].rolling(50).mean()
+                    c=df.iloc[-2]; conf=df.iloc[-1]
+                    O,H,L,C=float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
+                    total=H-L
+                    if total<0.00005: continue
+                    if df['atr'].iloc[-2] < df['atr_ma'].iloc[-2]*0.50: continue
+                    corpo=abs(O-C) or total*0.05; inf=min(O,C)-L; sup=H-max(O,C)
+                    forza=max(inf,sup)/total*100
+                    hammer=inf>=corpo*WICK_RATIO and inf>=total*0.45 and sup<=total*0.30 and corpo<=total*CORPO_MAX
+                    star=sup>=corpo*WICK_RATIO and sup>=total*0.45 and inf<=total*0.30 and corpo<=total*CORPO_MAX
+                    if not ((hammer or star) and FORZA_MIN<=forza<=FORZA_MAX): continue
+                    e20=float(df['ema20'].iloc[-2]); e50=float(df['ema50'].iloc[-2]); e200=float(df['ema200'].iloc[-2])
+                    rv=float(df['rsi'].iloc[-2]); atr_v=float(df['atr'].iloc[-2])
+                    if hammer and not (RSI_BUY_MIN <= rv <= RSI_BUY_MAX): continue
+                    if star and not (RSI_SELL_MIN <= rv <= RSI_SELL_MAX): continue
+                    if hammer and (float(conf['Close'])<L+total*0.50): continue
+                    if star and (float(conf['Close'])>H-total*0.50): continue
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+                    cooldown[key]=time.time(); stats[tf_name]+=1
+                    sig="CALL 📈" if hammer else "PUT 📉"
+                    tipo="Hammer" if hammer else "Shooting Star"
+                    sc=scadenza_it(cfg["scad_min"])
+                    
+                    # CALCOLI DETTAGLI
+                    dist_ema20 = ((C-e20)/C*100); dist_ema200 = ((C-e200)/C*100)
+                    sl = L - total*0.2 if hammer else H + total*0.2
+                    tp1 = C + total*1.5 if hammer else C - total*1.5
+                    tp2 = C + total*2.5 if hammer else C - total*2.5
+                    conf_close = float(conf['Close'])
+                    low50 = df['Low'].iloc[-51:-2].min(); high50 = df['High'].iloc[-51:-2].max()
 
-if not TOKEN or not CHAT_ID:
-    print("ERRORE: Imposta TELEGRAM_TOKEN e CHAT_ID su Render > Environment")
-    sys.exit(1)
+                    msg = (
+                        f"🎯 <b>PINBAR {tf_name} DETTAGLI</b> 🎯\n"
+                        f"━━━━━━━━━━━━━━\n"
+                        f"💱 Coppia: <b>{clean}</b>\n"
+                        f"📊 Segnale: <b>{sig} - {tipo}</b>\n"
+                        f"⏰ TF: <b>{tf_name}</b> | Scadenza: <b>{cfg['label']}</b>\n"
+                        f"━━━━━━━━━━━━━━\n"
+                        f"📍 Entry: <b>{(H+L)/2:.5f}</b>\n"
+                        f"💰 Prezzo attuale: {C:.5f}\n"
+                        f"🕐 Scadenza: <b>{sc}</b> ({cfg['label']})\n"
+                        f"━━━━━━━━━━━━━━\n"
+                        f"📈 DETTAGLI TECNICI:\n"
+                        f"Forza: {forza:.1f}% (min {FORZA_MIN}%)\n"
+                        f"RSI: {rv:.1f} ({'Ipervenduto' if rv<40 else 'Ipercomprato' if rv>60 else 'Neutro'})\n"
+                        f"Corpo: {corpo/total*100:.1f}% | Wick: {max(inf,sup)/total*100:.1f}%\n"
+                        f"EMA20: {e20:.5f} Dist: {dist_ema20:+.2f}%\n"
+                        f"EMA50: {e50:.5f}\n"
+                        f"EMA200: {e200:.5f} Dist: {dist_ema200:+.2f}%\n"
+                        f"ATR: {atr_v:.5f} {'(Mercato attivo)' if atr_v>df['atr_ma'].iloc[-2] else '(Lento)'}\n"
+                        f"Min 50: {low50:.5f} | Max 50: {high50:.5f}\n"
+                        f"━━━━━━━━━━━━━━\n"
+                        f"✅ CONFERMA: {conf_close:.5f} {'OK' if (hammer and conf_close> C) or (star and conf_close < C) else 'DEBOLE'}\n"
+                        f"🛡️ SL: {sl:.5f}\n"
+                        f"🎯 TP1: {tp1:.5f} (+1.5x)\n"
+                        f"🎯 TP2: {tp2:.5f} (+2.5x)\n"
+                        f"━━━━━━━━━━━━━━\n"
+                        f"🕒 Segnale: {ora_it()}\n"
+                        f"⚙️ Filtro: {FORZA_MIN}-{FORZA_MAX}% LARGO"
+                    )
+                    send(msg)
+                    time.sleep(1.5)
+                time.sleep(2)
+            time.sleep(60)
+        except Exception as e: print(f"DETTAGLI ERR {e}"); time.sleep(15)
 
-exchange = ccxt.binance()
-
-def is_pinbar_pulita(o,h,l,c):
-    corpo = abs(c-o)
-    rng = h-l
-    if rng==0 or corpo > rng*0.35: return False,None,0,0
-    up = h - max(o,c)
-    low = min(o,c) - l
-    forma_pct = (corpo/rng)*100
-    wick_ratio = max(up,low) / (corpo if corpo!=0 else 0.001)
-    if low > corpo*2.5 and low > up*1.5: return True,"BULLISH",forma_pct,wick_ratio
-    if up > corpo*2.5 and up > low*1.5: return True,"BEARISH",forma_pct,wick_ratio
-    return False,None,0,0
-
-async def main():
-    bot = Bot(token=TOKEN)
-    print(f"Bot L1 PINBAR 80% avviato! Chat {CHAT_ID}")
-    await bot.send_message(chat_id=CHAT_ID, text="✅ Bot Pinbar avviato su Render - cerco su 1H/4H/1D")
-    
-    coppie = [s for s in exchange.load_markets() if s.endswith('/USDT')][:25]
-    TIMEFRAMES = ['1h', '4h', '1d']
-
-    for tf in TIMEFRAMES:
-        for sim in coppie:
-            try:
-                kl = exchange.fetch_ohlcv(sim, tf, limit=250)
-                chiusure = [x[4] for x in kl]
-                o,h,l,c = kl[-1][1], kl[-1][2], kl[-1][3], kl[-1][4]
-                ema200 = sum(chiusure[-200:])/200
-                gains=[max(chiusure[i]-chiusure[i-1],0) for i in range(1,len(chiusure))]
-                losses=[max(-(chiusure[i]-chiusure[i-1]),0) for i in range(1,len(chiusure))]
-                avg_gain = sum(gains[-14:])/14
-                avg_loss = sum(losses[-14:])/14
-                rsi = 100 - (100/(1+ (avg_gain/(avg_loss if avg_loss!=0 else 0.001))))
-                is_pin,tipo,forma_pct,wick_ratio = is_pinbar_pulita(o,h,l,c)
-                if not is_pin: continue
-                if tipo=="BULLISH" and (c < ema200 or rsi>70): continue
-                if tipo=="BEARISH" and (c > ema200 or rsi<30): continue
-                max20 = max([x[2] for x in kl[-20:-1]])
-                min20 = min([x[3] for x in kl[-20:-1]])
-                if not (abs(c-max20)/c < 0.025 or abs(c-min20)/c < 0.025): continue
-
-                if tf == '1h': scadenza = "2-3H"
-                elif tf == '4h': scadenza = "8-12H"
-                else: scadenza = "2-3 Giorni"
-
-                if tipo=="BULLISH":
-                    sl = l - (h-l)*0.1
-                    tp1 = c + (c-sl)*2
-                else:
-                    sl = h + (h-l)*0.1
-                    tp1 = c - (sl-c)*2
-
-                msg = (
-                    f"💎 L1 PINBAR 80% {tipo} {sim} {tf.upper()}\n\n"
-                    f"📍 Prezzo: {c:.2f}\n"
-                    f"📊 EMA200: {ema200:.2f} | RSI: {rsi:.1f}\n"
-                    f"📈 Forma: {forma_pct:.1f}% | Wick {wick_ratio:.1f}x\n\n"
-                    f"⏰ Scadenza: {scadenza}\n"
-                    f"🛡️ SL: {sl:.2f}\n🎯 TP: {tp1:.2f}"
-                )
-                await bot.send_message(chat_id=CHAT_ID,text=msg)
-                await asyncio.sleep(1)
-            except Exception as e:
-                print(f"{sim} {tf} {e}")
-                continue
-
+threading.Thread(target=lavoro_pinbar_dettagli, daemon=True).start()
+app=Flask(__name__)
+@app.route('/')
+def home(): return f"PINBAR DETTAGLI LARGO | 1H:{stats['1H']} 4H:{stats['4H']} | {ora_it()}"
 if __name__=="__main__":
-    asyncio.run(main())
+    send(f"🚀 <b>PINBAR DETTAGLI AVVIATO</b>\nTF 1H→2H 4H→8H\nCon SL/TP + EMA + RSI + Forza\n{ora_it()}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
