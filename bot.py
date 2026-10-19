@@ -1,4 +1,4 @@
-# bot.py - PINBAR LARGO 1H+4H - DETTAGLI COMPLETI
+# bot.py - V70 FIX - 1H+4H - ANTI DUPLICATO + SOLO SEGNALI OK
 import os, time, threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -10,14 +10,15 @@ TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
 PAIRS = ["EURUSD=X","GBPUSD=X","EURGBP=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","CHFJPY=X","USDCAD=X","USDCHF=X","EURCHF=X"]
 
-FORZA_MIN, FORZA_MAX = 60, 92
-RSI_BUY_MIN, RSI_BUY_MAX = 20, 45
-RSI_SELL_MIN, RSI_SELL_MAX = 55, 80
-WICK_RATIO, CORPO_MAX = 1.5, 0.40
+# V70 PARAMETRI STRETTI BASATI SUI TUOI SEGNALI
+FORZA_MIN, FORZA_MAX = 70, 92
+RSI_BUY_MIN, RSI_BUY_MAX = 25, 38
+RSI_SELL_MIN, RSI_SELL_MAX = 62, 75
+WICK_RATIO, CORPO_MAX = 2.0, 0.30
 
 TFS = {
-    "1H": {"interval":"60m","range":"15d","scad_min":120,"label":"2H","cool":3600},
-    "4H": {"interval":"60m","range":"30d","scad_min":480,"label":"8H","resample":"4H","cool":10800},
+    "1H": {"interval":"60m","range":"15d","scad_min":120,"label":"2H","cool":3600}, # 1 ora no duplicati
+    "4H": {"interval":"60m","range":"30d","scad_min":480,"label":"8H","resample":"4H","cool":14400}, # 4 ore
 }
 
 ITALY = ZoneInfo("Europe/Rome")
@@ -42,7 +43,7 @@ def get_df(sym, interval, range_str, resample=None):
             r=cffi_requests.get(url, impersonate="chrome120", timeout=10)
             q=r.json()['chart']['result'][0]['indicators']['quote'][0]
             df=pd.DataFrame({'Open':q['open'],'High':q['high'],'Low':q['low'],'Close':q['close']}).dropna()
-            if len(df)<60: return pd.DataFrame()
+            if len(df)<80: return pd.DataFrame()
             if resample=="4H":
                 df=df.set_index(pd.date_range(end=datetime.now(), periods=len(df), freq='H')).resample('4H').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna().reset_index(drop=True)
             return df.tail(200)
@@ -52,8 +53,8 @@ def send(m):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":m,"parse_mode":"HTML"}, timeout=8)
     except: pass
 
-def lavoro_pinbar_dettagli():
-    print("PINBAR DETTAGLI avviato", flush=True)
+def lavoro_v70():
+    print("V70 FIX avviato", flush=True)
     while True:
         try:
             for tf_name, cfg in TFS.items():
@@ -61,79 +62,79 @@ def lavoro_pinbar_dettagli():
                     clean=sym.replace("=X","")
                     key=f"{clean}_{tf_name}"
                     if key in cooldown and time.time()-cooldown[key]<cfg["cool"]: continue
+                    
                     df=get_df(sym, cfg["interval"], cfg["range"], cfg.get("resample"))
-                    if len(df)<60: continue
+                    if len(df)<80: continue
                     df['ema20']=ema(df['Close'],20); df['ema50']=ema(df['Close'],50); df['ema200']=ema(df['Close'],200)
                     df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma']=df['atr'].rolling(50).mean()
                     c=df.iloc[-2]; conf=df.iloc[-1]
                     O,H,L,C=float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
                     total=H-L
-                    if total<0.00005: continue
-                    if df['atr'].iloc[-2] < df['atr_ma'].iloc[-2]*0.50: continue
+                    if total<0.00008: continue
+                    
+                    # FIX 1: SOLO ATR ATTIVO - toglie CHFJPY lento che ti ha dato falso
+                    if float(c['atr']) < float(c['atr_ma'])*0.70: continue
+                    
                     corpo=abs(O-C) or total*0.05; inf=min(O,C)-L; sup=H-max(O,C)
                     forza=max(inf,sup)/total*100
-                    hammer=inf>=corpo*WICK_RATIO and inf>=total*0.45 and sup<=total*0.30 and corpo<=total*CORPO_MAX
-                    star=sup>=corpo*WICK_RATIO and sup>=total*0.45 and inf<=total*0.30 and corpo<=total*CORPO_MAX
+                    hammer=inf>=corpo*WICK_RATIO and inf>=total*0.55 and sup<=total*0.20 and corpo<=total*CORPO_MAX
+                    star=sup>=corpo*WICK_RATIO and sup>=total*0.55 and inf<=total*0.20 and corpo<=total*CORPO_MAX
                     if not ((hammer or star) and FORZA_MIN<=forza<=FORZA_MAX): continue
-                    e20=float(df['ema20'].iloc[-2]); e50=float(df['ema50'].iloc[-2]); e200=float(df['ema200'].iloc[-2])
-                    rv=float(df['rsi'].iloc[-2]); atr_v=float(df['atr'].iloc[-2])
+                    
+                    e20=float(c['ema20']); e50=float(c['ema50']); e200=float(c['ema200'])
+                    rv=float(c['rsi']); price=C
+                    
+                    # FIX 2: RSI STRETTISSIMO - toglie AUDUSD 58.6 e USDCAD 43 neutro
                     if hammer and not (RSI_BUY_MIN <= rv <= RSI_BUY_MAX): continue
                     if star and not (RSI_SELL_MIN <= rv <= RSI_SELL_MAX): continue
-                    if hammer and (float(conf['Close'])<L+total*0.50): continue
-                    if star and (float(conf['Close'])>H-total*0.50): continue
-
+                    
+                    # FIX 3: CONTRO EMA200 NO - toglie USDCAD CALL sotto EMA200
+                    if hammer and C < e200*0.998: continue
+                    if star and C > e200*1.002: continue
+                    
+                    # FIX 4: SOLO CONFERMA OK - toglie DEBOLE
+                    conf_c=float(conf['Close'])
+                    if hammer and (conf_c < L+total*0.65 or conf_c <= float(conf['Open'])): continue
+                    if star and (conf_c > H-total*0.65 or conf_c >= float(conf['Open'])): continue
+                    
+                    # FIX 5: SL troppo stretto NO
+                    sl = L-total*0.25 if hammer else H+total*0.25
+                    if abs(sl-C)/C < 0.0008: continue # SL < 0.08% troppo vicino
+                    
                     cooldown[key]=time.time(); stats[tf_name]+=1
                     sig="CALL 📈" if hammer else "PUT 📉"
-                    tipo="Hammer" if hammer else "Shooting Star"
+                    tipo="Hammer"; 
+                    if star: tipo="Shooting Star"
                     sc=scadenza_it(cfg["scad_min"])
+                    dist_e20=(C-e20)/C*100; dist_e200=(C-e200)/C*100
+                    sl_val=sl; tp1=C+total*1.8 if hammer else C-total*1.8; tp2=C+total*3.0 if hammer else C-total*3.0
                     
-                    # CALCOLI DETTAGLI
-                    dist_ema20 = ((C-e20)/C*100); dist_ema200 = ((C-e200)/C*100)
-                    sl = L - total*0.2 if hammer else H + total*0.2
-                    tp1 = C + total*1.5 if hammer else C - total*1.5
-                    tp2 = C + total*2.5 if hammer else C - total*2.5
-                    conf_close = float(conf['Close'])
-                    low50 = df['Low'].iloc[-51:-2].min(); high50 = df['High'].iloc[-51:-2].max()
-
-                    msg = (
-                        f"🎯 <b>PINBAR {tf_name} DETTAGLI</b> 🎯\n"
+                    msg=(
+                        f"🎯 <b>PINBAR V70 {tf_name}</b> 🎯\n"
                         f"━━━━━━━━━━━━━━\n"
-                        f"💱 Coppia: <b>{clean}</b>\n"
-                        f"📊 Segnale: <b>{sig} - {tipo}</b>\n"
-                        f"⏰ TF: <b>{tf_name}</b> | Scadenza: <b>{cfg['label']}</b>\n"
+                        f"💱 {clean} | <b>{sig} {tipo}</b>\n"
+                        f"⏰ TF: {tf_name} → Scad: {cfg['label']} alle {sc}\n"
                         f"━━━━━━━━━━━━━━\n"
-                        f"📍 Entry: <b>{(H+L)/2:.5f}</b>\n"
-                        f"💰 Prezzo attuale: {C:.5f}\n"
-                        f"🕐 Scadenza: <b>{sc}</b> ({cfg['label']})\n"
+                        f"📍 Entry: {(H+L)/2:.5f}\n"
+                        f"💰 Price: {C:.5f}\n"
+                        f"📊 Forza: {forza:.1f}% | Corpo: {corpo/total*100:.1f}% | Wick: {max(inf,sup)/total*100:.1f}%\n"
+                        f"📈 RSI: {rv:.1f} ({'BUY' if hammer else 'SELL'} OK) | ATR: ATTIVO ✓\n"
+                        f"📉 EMA20: {e20:.5f} ({dist_e20:+.2f}%) | EMA200: {e200:.5f} ({dist_e200:+.2f}%)\n"
                         f"━━━━━━━━━━━━━━\n"
-                        f"📈 DETTAGLI TECNICI:\n"
-                        f"Forza: {forza:.1f}% (min {FORZA_MIN}%)\n"
-                        f"RSI: {rv:.1f} ({'Ipervenduto' if rv<40 else 'Ipercomprato' if rv>60 else 'Neutro'})\n"
-                        f"Corpo: {corpo/total*100:.1f}% | Wick: {max(inf,sup)/total*100:.1f}%\n"
-                        f"EMA20: {e20:.5f} Dist: {dist_ema20:+.2f}%\n"
-                        f"EMA50: {e50:.5f}\n"
-                        f"EMA200: {e200:.5f} Dist: {dist_ema200:+.2f}%\n"
-                        f"ATR: {atr_v:.5f} {'(Mercato attivo)' if atr_v>df['atr_ma'].iloc[-2] else '(Lento)'}\n"
-                        f"Min 50: {low50:.5f} | Max 50: {high50:.5f}\n"
-                        f"━━━━━━━━━━━━━━\n"
-                        f"✅ CONFERMA: {conf_close:.5f} {'OK' if (hammer and conf_close> C) or (star and conf_close < C) else 'DEBOLE'}\n"
-                        f"🛡️ SL: {sl:.5f}\n"
-                        f"🎯 TP1: {tp1:.5f} (+1.5x)\n"
-                        f"🎯 TP2: {tp2:.5f} (+2.5x)\n"
-                        f"━━━━━━━━━━━━━━\n"
-                        f"🕒 Segnale: {ora_it()}\n"
-                        f"⚙️ Filtro: {FORZA_MIN}-{FORZA_MAX}% LARGO"
+                        f"✅ Conferma: {conf_c:.5f} OK ✓\n"
+                        f"🛡️ SL: {sl_val:.5f} | 🎯 TP1: {tp1:.5f} | TP2: {tp2:.5f}\n"
+                        f"🕒 {ora_it()} | Filtro V70 {FORZA_MIN}-{FORZA_MAX}%"
                     )
                     send(msg)
-                    time.sleep(1.5)
-                time.sleep(2)
-            time.sleep(60)
-        except Exception as e: print(f"DETTAGLI ERR {e}"); time.sleep(15)
+                    time.sleep(2)
+                time.sleep(3)
+            time.sleep(90)
+        except Exception as e: print(f"V70 ERR {e}"); time.sleep(20)
 
-threading.Thread(target=lavoro_pinbar_dettagli, daemon=True).start()
+threading.Thread(target=lavoro_v70, daemon=True).start()
 app=Flask(__name__)
 @app.route('/')
-def home(): return f"PINBAR DETTAGLI LARGO | 1H:{stats['1H']} 4H:{stats['4H']} | {ora_it()}"
+def home(): return f"V70 FIX | 1H:{stats['1H']} 4H:{stats['4H']} | Forza {FORZA_MIN}-{FORZA_MAX} | {ora_it()} | No duplicati"
 if __name__=="__main__":
-    send(f"🚀 <b>PINBAR DETTAGLI AVVIATO</b>\nTF 1H→2H 4H→8H\nCon SL/TP + EMA + RSI + Forza\n{ora_it()}")
+    send(f"🚀 <b>V70 FIX AVVIATO</b>\nAnti-duplicato 1H/4H\nSolo ATR attivo + RSI {RSI_BUY_MIN}-{RSI_BUY_MAX}/{RSI_SELL_MIN}-{RSI_SELL_MAX} + Conferma OK\n{ora_it()}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
