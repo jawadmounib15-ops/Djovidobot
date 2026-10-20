@@ -1,4 +1,4 @@
-# bot.py - V70 FIX - 1H+4H - ANTI DUPLICATO + SOLO SEGNALI OK
+# bot.py - 2 MIN SOLO REALI - V2M
 import os, time, threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -8,25 +8,14 @@ from flask import Flask
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
-PAIRS = ["EURUSD=X","GBPUSD=X","EURGBP=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","CHFJPY=X","USDCAD=X","USDCHF=X","EURCHF=X"]
-
-# V70 PARAMETRI STRETTI BASATI SUI TUOI SEGNALI
-FORZA_MIN, FORZA_MAX = 70, 92
-RSI_BUY_MIN, RSI_BUY_MAX = 25, 38
-RSI_SELL_MIN, RSI_SELL_MAX = 62, 75
-WICK_RATIO, CORPO_MAX = 2.0, 0.30
-
-TFS = {
-    "1H": {"interval":"60m","range":"15d","scad_min":120,"label":"2H","cool":3600}, # 1 ora no duplicati
-    "4H": {"interval":"60m","range":"30d","scad_min":480,"label":"8H","resample":"4H","cool":14400}, # 4 ore
-}
+PAIRS = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","EURGBP=X","USDCAD=X"] # 8 major - su 2m non usare 17 sono troppi
 
 ITALY = ZoneInfo("Europe/Rome")
 cooldown = {}; lock = threading.Lock()
-stats = {"1H":0,"4H":0}
+stats = {"2M":0}
 
-def ora_it(): return datetime.now(ITALY).strftime("%H:%M:%S %d/%m")
-def scadenza_it(m): return (datetime.now(ITALY)+timedelta(minutes=m)).strftime("%H:%M:%S %d/%m")
+def ora_it(): return datetime.now(ITALY).strftime("%H:%M:%S")
+def scadenza_it(m=4): return (datetime.now(ITALY)+timedelta(minutes=m)).strftime("%H:%M:%S")
 def ema(s,p): return s.ewm(span=p).mean()
 def rsi(s,p=14):
     d=s.diff(); g=d.where(d>0,0).rolling(p).mean(); l=-d.where(d<0,0).rolling(p).mean()
@@ -36,16 +25,14 @@ def atr(df,p=14):
     tr=pd.concat([hl,hc,lc],axis=1).max(axis=1)
     return tr.rolling(p).mean()
 
-def get_df(sym, interval, range_str, resample=None):
+def get_df_2m(sym):
     try:
         with lock:
-            url=f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={interval}&range={range_str}"
-            r=cffi_requests.get(url, impersonate="chrome120", timeout=10)
+            # 2m range 1d - massimo che Yahoo da
+            url=f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=2m&range=1d"
+            r=cffi_requests.get(url, impersonate="chrome120", timeout=8)
             q=r.json()['chart']['result'][0]['indicators']['quote'][0]
             df=pd.DataFrame({'Open':q['open'],'High':q['high'],'Low':q['low'],'Close':q['close']}).dropna()
-            if len(df)<80: return pd.DataFrame()
-            if resample=="4H":
-                df=df.set_index(pd.date_range(end=datetime.now(), periods=len(df), freq='H')).resample('4H').agg({'Open':'first','High':'max','Low':'min','Close':'last'}).dropna().reset_index(drop=True)
             return df.tail(200)
     except: return pd.DataFrame()
 
@@ -53,88 +40,90 @@ def send(m):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":m,"parse_mode":"HTML"}, timeout=8)
     except: pass
 
-def lavoro_v70():
-    print("V70 FIX avviato", flush=True)
+def lavoro_2m_reali():
+    print("2M REALI avviato", flush=True)
     while True:
         try:
-            for tf_name, cfg in TFS.items():
-                for sym in PAIRS:
-                    clean=sym.replace("=X","")
-                    key=f"{clean}_{tf_name}"
-                    if key in cooldown and time.time()-cooldown[key]<cfg["cool"]: continue
-                    
-                    df=get_df(sym, cfg["interval"], cfg["range"], cfg.get("resample"))
-                    if len(df)<80: continue
-                    df['ema20']=ema(df['Close'],20); df['ema50']=ema(df['Close'],50); df['ema200']=ema(df['Close'],200)
-                    df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma']=df['atr'].rolling(50).mean()
-                    c=df.iloc[-2]; conf=df.iloc[-1]
-                    O,H,L,C=float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
-                    total=H-L
-                    if total<0.00008: continue
-                    
-                    # FIX 1: SOLO ATR ATTIVO - toglie CHFJPY lento che ti ha dato falso
-                    if float(c['atr']) < float(c['atr_ma'])*0.70: continue
-                    
-                    corpo=abs(O-C) or total*0.05; inf=min(O,C)-L; sup=H-max(O,C)
-                    forza=max(inf,sup)/total*100
-                    hammer=inf>=corpo*WICK_RATIO and inf>=total*0.55 and sup<=total*0.20 and corpo<=total*CORPO_MAX
-                    star=sup>=corpo*WICK_RATIO and sup>=total*0.55 and inf<=total*0.20 and corpo<=total*CORPO_MAX
-                    if not ((hammer or star) and FORZA_MIN<=forza<=FORZA_MAX): continue
-                    
-                    e20=float(c['ema20']); e50=float(c['ema50']); e200=float(c['ema200'])
-                    rv=float(c['rsi']); price=C
-                    
-                    # FIX 2: RSI STRETTISSIMO - toglie AUDUSD 58.6 e USDCAD 43 neutro
-                    if hammer and not (RSI_BUY_MIN <= rv <= RSI_BUY_MAX): continue
-                    if star and not (RSI_SELL_MIN <= rv <= RSI_SELL_MAX): continue
-                    
-                    # FIX 3: CONTRO EMA200 NO - toglie USDCAD CALL sotto EMA200
-                    if hammer and C < e200*0.998: continue
-                    if star and C > e200*1.002: continue
-                    
-                    # FIX 4: SOLO CONFERMA OK - toglie DEBOLE
-                    conf_c=float(conf['Close'])
-                    if hammer and (conf_c < L+total*0.65 or conf_c <= float(conf['Open'])): continue
-                    if star and (conf_c > H-total*0.65 or conf_c >= float(conf['Open'])): continue
-                    
-                    # FIX 5: SL troppo stretto NO
-                    sl = L-total*0.25 if hammer else H+total*0.25
-                    if abs(sl-C)/C < 0.0008: continue # SL < 0.08% troppo vicino
-                    
-                    cooldown[key]=time.time(); stats[tf_name]+=1
-                    sig="CALL 📈" if hammer else "PUT 📉"
-                    tipo="Hammer"; 
-                    if star: tipo="Shooting Star"
-                    sc=scadenza_it(cfg["scad_min"])
-                    dist_e20=(C-e20)/C*100; dist_e200=(C-e200)/C*100
-                    sl_val=sl; tp1=C+total*1.8 if hammer else C-total*1.8; tp2=C+total*3.0 if hammer else C-total*3.0
-                    
-                    msg=(
-                        f"🎯 <b>PINBAR V70 {tf_name}</b> 🎯\n"
-                        f"━━━━━━━━━━━━━━\n"
-                        f"💱 {clean} | <b>{sig} {tipo}</b>\n"
-                        f"⏰ TF: {tf_name} → Scad: {cfg['label']} alle {sc}\n"
-                        f"━━━━━━━━━━━━━━\n"
-                        f"📍 Entry: {(H+L)/2:.5f}\n"
-                        f"💰 Price: {C:.5f}\n"
-                        f"📊 Forza: {forza:.1f}% | Corpo: {corpo/total*100:.1f}% | Wick: {max(inf,sup)/total*100:.1f}%\n"
-                        f"📈 RSI: {rv:.1f} ({'BUY' if hammer else 'SELL'} OK) | ATR: ATTIVO ✓\n"
-                        f"📉 EMA20: {e20:.5f} ({dist_e20:+.2f}%) | EMA200: {e200:.5f} ({dist_e200:+.2f}%)\n"
-                        f"━━━━━━━━━━━━━━\n"
-                        f"✅ Conferma: {conf_c:.5f} OK ✓\n"
-                        f"🛡️ SL: {sl_val:.5f} | 🎯 TP1: {tp1:.5f} | TP2: {tp2:.5f}\n"
-                        f"🕒 {ora_it()} | Filtro V70 {FORZA_MIN}-{FORZA_MAX}%"
-                    )
-                    send(msg)
-                    time.sleep(2)
-                time.sleep(3)
-            time.sleep(90)
-        except Exception as e: print(f"V70 ERR {e}"); time.sleep(20)
+            for sym in PAIRS:
+                clean=sym.replace("=X","")
+                if clean in cooldown and time.time()-cooldown[clean]<600: continue # 10 min cooldown - anti spam
+                if not 8 <= datetime.now(ITALY).hour <= 22: time.sleep(60); continue
+                
+                df=get_df_2m(sym)
+                if len(df)<80: continue
+                df['ema20']=ema(df['Close'],20); df['ema50']=ema(df['Close'],50); df['ema200']=ema(df['Close'],200)
+                df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma']=df['atr'].rolling(50).mean()
+                
+                c=df.iloc[-2]; conf=df.iloc[-1] # candela chiusa + conferma
+                O,H,L,C=float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
+                total=H-L
+                if total<0.00005: continue
+                
+                # SOLO MERCATO ATTIVO - niente lento
+                atr_v=float(df['atr'].iloc[-2]); atr_ma=float(df['atr_ma'].iloc[-2])
+                if atr_v < atr_ma*0.80: continue
+                if atr_v > atr_ma*2.2: continue
+                
+                corpo=abs(O-C); inf=min(O,C)-L; sup=H-max(O,C)
+                forza=max(inf,sup)/total*100
+                
+                # PINBAR REALI 2M - 72-92%
+                hammer=inf>=corpo*2.0 and inf>=total*0.58 and sup<=total*0.18 and corpo<=total*0.28
+                star=sup>=corpo*2.0 and sup>=total*0.58 and inf<=total*0.18 and corpo<=total*0.28
+                if not ((hammer or star) and 72<=forza<=92): continue
+                
+                # Supporto/Resistenza 30 candele - OBBLIGATORIO su 2m
+                low30=df['Low'].iloc[-31:-2].min(); high30=df['High'].iloc[-31:-2].max()
+                if hammer and L > low30*1.0008: continue
+                if star and H < high30*0.9992: continue
+                
+                e20=float(df['ema20'].iloc[-2]); e50=float(df['ema50'].iloc[-2]); e200=float(df['ema200'].iloc[-2])
+                rv=float(df['rsi'].iloc[-2])
+                
+                # RSI REALE 2M
+                if hammer and not (20 <= rv <= 38): continue
+                if star and not (62 <= rv <= 80): continue
+                
+                # Distanza EMA20 max 0.25% - se lontano è falso
+                if abs(C-e20)/C > 0.0025: continue
+                
+                # Contro trend no
+                if hammer and C < e200*0.9985: continue
+                if star and C > e200*1.0015: continue
+                
+                # Conferma OK obbligatoria
+                conf_c=float(conf['Close'])
+                if hammer and (conf_c < L+total*0.65 or conf_c <= float(conf['Open'])): continue
+                if star and (conf_c > H-total*0.65 or conf_c >= float(conf['Open'])): continue
+                
+                # SL check
+                sl = L-total*0.3 if hammer else H+total*0.3
+                if abs(sl-C)/C < 0.0006: continue
+                
+                cooldown[clean]=time.time(); stats["2M"]+=1
+                sig="CALL 📈" if hammer else "PUT 📉"
+                tipo="Hammer Reale" if hammer else "Shooting Star Reale"
+                sc=scadenza_it(4)
+                
+                msg=(
+                    f"⚡ <b>2M REALE</b> ⚡\n"
+                    f"💱 {clean} {sig}\n"
+                    f"📍 Entry {(H+L)/2:.5f} | Price {C:.5f}\n"
+                    f"⏰ TF 2M → Scad 4M alle {sc}\n"
+                    f"📊 {tipo} {forza:.0f}% | RSI {rv:.0f} | ATR ATTIVO ✓\n"
+                    f"📉 EMA20 {e20:.5f} Dist {((C-e20)/C*100):+.2f}% | EMA200 {e200:.5f}\n"
+                    f"✅ Conf {conf_c:.5f} OK | SL {sl:.5f}\n"
+                    f"🕒 {ora_it()}"
+                )
+                send(msg)
+                time.sleep(1.5)
+            time.sleep(15) # scan ogni 15 sec su 2m
+        except Exception as e: print(f"2M ERR {e}"); time.sleep(10)
 
-threading.Thread(target=lavoro_v70, daemon=True).start()
+threading.Thread(target=lavoro_2m_reali, daemon=True).start()
 app=Flask(__name__)
 @app.route('/')
-def home(): return f"V70 FIX | 1H:{stats['1H']} 4H:{stats['4H']} | Forza {FORZA_MIN}-{FORZA_MAX} | {ora_it()} | No duplicati"
+def home(): return f"2M REALI | Segnali:{stats['2M']} | {ora_it()} | Cooldown 10m | Forza 72-92%"
 if __name__=="__main__":
-    send(f"🚀 <b>V70 FIX AVVIATO</b>\nAnti-duplicato 1H/4H\nSolo ATR attivo + RSI {RSI_BUY_MIN}-{RSI_BUY_MAX}/{RSI_SELL_MIN}-{RSI_SELL_MAX} + Conferma OK\n{ora_it()}")
+    send(f"🚀 <b>2M REALI AVVIATO</b>\nTF 2M → Scad 4M\nFiltro 72-92% + Supp/Res 30 + ATR attivo\n{ora_it()}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
