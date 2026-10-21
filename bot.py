@@ -1,4 +1,4 @@
-# bot.py - 60% UN SOLO MSG 60s PRE - FINALE
+# bot.py - 58% UN SOLO MSG 60s - ALLARGATO PIANO
 import os, time, threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -22,6 +22,7 @@ def atr(df,p=14):
     hl=df['High']-df['Low']; hc=abs(df['High']-df['Close'].shift()); lc=abs(df['Low']-df['Close'].shift())
     tr=pd.concat([hl,hc,lc],axis=1).max(axis=1)
     return tr.rolling(p).mean()
+
 def secondi_chiusura():
     now = datetime.now(ITALY)
     prossimo = ((now.minute // 2) + 1) * 2
@@ -30,6 +31,7 @@ def secondi_chiusura():
     else:
         chiusura = now.replace(minute=prossimo, second=0, microsecond=0)
     return (chiusura - now).total_seconds()
+
 def get_df(sym):
     try:
         with lock:
@@ -39,46 +41,46 @@ def get_df(sym):
             df=pd.DataFrame({'Open':q['open'],'High':q['high'],'Low':q['low'],'Close':q['close']}).dropna()
             return df.tail(200)
     except: return pd.DataFrame()
+
 def send(m):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":m,"parse_mode":"HTML"}, timeout=8)
     except: pass
 
 def lavoro():
-    print("2M 60% FINALE avviato", flush=True)
+    print("2M 58% avviato", flush=True)
     while True:
         try:
             sec = secondi_chiusura()
-            if not (50 <= sec <= 70):
+            if not (40 <= sec <= 80):
                 time.sleep(5); continue
             for sym in PAIRS:
                 clean=sym.replace("=X","")
-                if clean in cooldown and time.time()-cooldown[clean]<300: continue
+                if clean in cooldown and time.time()-cooldown[clean]<240: continue
                 df=get_df(sym)
                 if len(df)<60: continue
                 df['ema20']=ema(df['Close'],20); df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma']=df['atr'].rolling(50).mean()
                 c=df.iloc[-1]
                 O,H,L,C=float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
                 total=H-L
-                if total<0.00003: continue
+                if total<0.00002: continue
                 atr_v=float(df['atr'].iloc[-1]); atr_ma=float(df['atr_ma'].iloc[-1])
-                if atr_v < atr_ma*0.50: continue
+                if atr_v < atr_ma*0.45: continue
                 
                 corpo=abs(O-C) or total*0.05; inf=min(O,C)-L; sup=H-max(O,C)
                 forza=max(inf,sup)/total*100
-                hammer=inf>=corpo*1.5 and inf>=total*0.45 and sup<=total*0.30 and corpo<=total*0.40
-                star=sup>=corpo*1.5 and sup>=total*0.45 and inf<=total*0.30 and corpo<=total*0.40
-                if not ((hammer or star) and 60<=forza<=92): continue # 60% FISSO
+                hammer=inf>=corpo*1.4 and inf>=total*0.42 and sup<=total*0.32 and corpo<=total*0.42
+                star=sup>=corpo*1.4 and sup>=total*0.42 and inf<=total*0.32 and corpo<=total*0.42
+                if not ((hammer or star) and 58<=forza<=92): continue
                 
                 rv=float(df['rsi'].iloc[-1])
-                if hammer and not (20 <= rv <= 45): continue
-                if star and not (55 <= rv <= 80): continue
+                if hammer and not (18 <= rv <= 47): continue
+                if star and not (53 <= rv <= 82): continue
                 
                 cooldown[clean]=time.time(); stats["2M"]+=1
                 sig="CALL 📈" if hammer else "PUT 📉"
-                tipo="Hammer" if hammer else "Star"
                 chiusura = (datetime.now(ITALY) + timedelta(seconds=sec)).strftime("%H:%M:%S")
                 scadenza = (datetime.now(ITALY) + timedelta(seconds=sec+120)).strftime("%H:%M:%S")
-                send(f"⚡ <b>2M {int(sec)}s - {clean} {sig}</b> ⚡\n💱 {tipo} {forza:.0f}% RSI {rv:.0f}\n📍 {(H+L)/2:.5f} Price {C:.5f}\n⏰ Entra {chiusura} → Scad 2M {scadenza}\n🕒 {ora_it()}")
+                send(f"⚡ <b>2M {int(sec)}s - {clean} {sig}</b> ⚡\n💱 Forza {forza:.0f}% RSI {rv:.0f}\n📍 {(H+L)/2:.5f} Price {C:.5f}\n⏰ Entra {chiusura} → Scad 2M {scadenza}\n🕒 {ora_it()}")
             time.sleep(10)
         except Exception as e:
             print(f"ERR {e}"); time.sleep(10)
@@ -86,7 +88,7 @@ def lavoro():
 threading.Thread(target=lavoro, daemon=True).start()
 app=Flask(__name__)
 @app.route('/')
-def home(): return f"2M 60% | {stats['2M']} | {ora_it()}"
+def home(): return f"2M 58% | {stats['2M']} | {ora_it()}"
 if __name__=="__main__":
-    send(f"🚀 <b>2M 60% FINALE</b>\n60% 1 MSG 60s prima Scad 2M\n{ora_it()}")
+    send(f"🚀 <b>2M 58% - ALLARGATO PIANO</b>\n58% 40-80s 240s cooldown\n{ora_it()}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
