@@ -1,4 +1,4 @@
-# bot.py - MEDIO 61% - EQUILIBRIO
+# bot.py - 60% UN SOLO MSG 60s PRE - FINALE
 import os, time, threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -44,7 +44,7 @@ def send(m):
     except: pass
 
 def lavoro():
-    print("2M MEDIO 61% avviato", flush=True)
+    print("2M 60% FINALE avviato", flush=True)
     while True:
         try:
             sec = secondi_chiusura()
@@ -61,26 +61,24 @@ def lavoro():
                 total=H-L
                 if total<0.00003: continue
                 atr_v=float(df['atr'].iloc[-1]); atr_ma=float(df['atr_ma'].iloc[-1])
-                if atr_v < atr_ma*0.55: continue # medio 0.55
-                if atr_v > atr_ma*2.8: continue
+                if atr_v < atr_ma*0.50: continue
                 
                 corpo=abs(O-C) or total*0.05; inf=min(O,C)-L; sup=H-max(O,C)
                 forza=max(inf,sup)/total*100
-                hammer=inf>=corpo*1.5 and inf>=total*0.46 and sup<=total*0.28 and corpo<=total*0.38
-                star=sup>=corpo*1.5 and sup>=total*0.46 and inf<=total*0.28 and corpo<=total*0.38
-                if not ((hammer or star) and 61<=forza<=92): continue # 61% medio
+                hammer=inf>=corpo*1.5 and inf>=total*0.45 and sup<=total*0.30 and corpo<=total*0.40
+                star=sup>=corpo*1.5 and sup>=total*0.45 and inf<=total*0.30 and corpo<=total*0.40
+                if not ((hammer or star) and 60<=forza<=92): continue # 60% FISSO
                 
                 rv=float(df['rsi'].iloc[-1])
-                if hammer and not (21 <= rv <= 44): continue # medio
-                if star and not (56 <= rv <= 79): continue
-                if abs(C-float(df['ema20'].iloc[-1]))/C > 0.0055: continue
+                if hammer and not (20 <= rv <= 45): continue
+                if star and not (55 <= rv <= 80): continue
                 
                 cooldown[clean]=time.time(); stats["2M"]+=1
                 sig="CALL 📈" if hammer else "PUT 📉"
+                tipo="Hammer" if hammer else "Star"
                 chiusura = (datetime.now(ITALY) + timedelta(seconds=sec)).strftime("%H:%M:%S")
                 scadenza = (datetime.now(ITALY) + timedelta(seconds=sec+120)).strftime("%H:%M:%S")
-                send(f"⚡ <b>2M {int(sec)}s - {clean} {sig}</b> ⚡\n📍 {(H+L)/2:.5f} Forza {forza:.0f}% RSI {rv:.0f}\n⏰ Entra {chiusura} → Scad 2M {scadenza}\n🕒 {ora_it()}")
-                time.sleep(0.8)
+                send(f"⚡ <b>2M {int(sec)}s - {clean} {sig}</b> ⚡\n💱 {tipo} {forza:.0f}% RSI {rv:.0f}\n📍 {(H+L)/2:.5f} Price {C:.5f}\n⏰ Entra {chiusura} → Scad 2M {scadenza}\n🕒 {ora_it()}")
             time.sleep(10)
         except Exception as e:
             print(f"ERR {e}"); time.sleep(10)
@@ -88,7 +86,7 @@ def lavoro():
 threading.Thread(target=lavoro, daemon=True).start()
 app=Flask(__name__)
 @app.route('/')
-def home(): return f"2M MEDIO 61% | {stats['2M']} | {ora_it()}"
+def home(): return f"2M 60% | {stats['2M']} | {ora_it()}"
 if __name__=="__main__":
-    send(f"🚀 <b>2M MEDIO 61% - EQUILIBRIO</b>\nForza 61% RSI 21-44/56-79\n{ora_it()}")
+    send(f"🚀 <b>2M 60% FINALE</b>\n60% 1 MSG 60s prima Scad 2M\n{ora_it()}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
