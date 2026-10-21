@@ -1,4 +1,4 @@
-# bot.py - STRETTO UN PELO - 63% + RSI stretto
+# bot.py - MEDIO 61% - EQUILIBRIO
 import os, time, threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -22,7 +22,6 @@ def atr(df,p=14):
     hl=df['High']-df['Low']; hc=abs(df['High']-df['Close'].shift()); lc=abs(df['Low']-df['Close'].shift())
     tr=pd.concat([hl,hc,lc],axis=1).max(axis=1)
     return tr.rolling(p).mean()
-
 def secondi_chiusura():
     now = datetime.now(ITALY)
     prossimo = ((now.minute // 2) + 1) * 2
@@ -31,7 +30,6 @@ def secondi_chiusura():
     else:
         chiusura = now.replace(minute=prossimo, second=0, microsecond=0)
     return (chiusura - now).total_seconds()
-
 def get_df(sym):
     try:
         with lock:
@@ -41,75 +39,56 @@ def get_df(sym):
             df=pd.DataFrame({'Open':q['open'],'High':q['high'],'Low':q['low'],'Close':q['close']}).dropna()
             return df.tail(200)
     except: return pd.DataFrame()
-
 def send(m):
     try: requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage", params={"chat_id":CHAT_ID,"text":m,"parse_mode":"HTML"}, timeout=8)
     except: pass
 
 def lavoro():
-    print("2M STRETTO UN PELO 63% avviato", flush=True)
+    print("2M MEDIO 61% avviato", flush=True)
     while True:
         try:
             sec = secondi_chiusura()
             if not (50 <= sec <= 70):
-                time.sleep(5)
-                continue
+                time.sleep(5); continue
             for sym in PAIRS:
                 clean=sym.replace("=X","")
-                if clean in cooldown and time.time()-cooldown[clean]<360: continue # 6 min
+                if clean in cooldown and time.time()-cooldown[clean]<300: continue
                 df=get_df(sym)
-                if len(df)<70: continue
-                df['ema20']=ema(df['Close'],20); df['ema50']=ema(df['Close'],50); df['ema200']=ema(df['Close'],200)
-                df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma']=df['atr'].rolling(50).mean()
+                if len(df)<60: continue
+                df['ema20']=ema(df['Close'],20); df['rsi']=rsi(df['Close']); df['atr']=atr(df,14); df['atr_ma']=df['atr'].rolling(50).mean()
                 c=df.iloc[-1]
                 O,H,L,C=float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
                 total=H-L
-                if total<0.00004: continue # era 0.00003 - più stretto
+                if total<0.00003: continue
                 atr_v=float(df['atr'].iloc[-1]); atr_ma=float(df['atr_ma'].iloc[-1])
-                if atr_v < atr_ma*0.60: continue # era 0.50 -> 0.60
-                if atr_v > atr_ma*2.5: continue # era 3.0 -> 2.5
+                if atr_v < atr_ma*0.55: continue # medio 0.55
+                if atr_v > atr_ma*2.8: continue
                 
                 corpo=abs(O-C) or total*0.05; inf=min(O,C)-L; sup=H-max(O,C)
                 forza=max(inf,sup)/total*100
-                # STRETTO UN PELO: 1.6 invece di 1.5
-                hammer=inf>=corpo*1.6 and inf>=total*0.48 and sup<=total*0.25 and corpo<=total*0.35
-                star=sup>=corpo*1.6 and sup>=total*0.48 and inf<=total*0.25 and corpo<=total*0.35
-                if not ((hammer or star) and 63<=forza<=92): continue # 60 -> 63
+                hammer=inf>=corpo*1.5 and inf>=total*0.46 and sup<=total*0.28 and corpo<=total*0.38
+                star=sup>=corpo*1.5 and sup>=total*0.46 and inf<=total*0.28 and corpo<=total*0.38
+                if not ((hammer or star) and 61<=forza<=92): continue # 61% medio
                 
-                e20=float(df['ema20'].iloc[-1]); e200=float(df['ema200'].iloc[-1]); rv=float(df['rsi'].iloc[-1])
-                # RSI STRETTO UN PELO: 22-42 e 58-78 invece di 20-45 / 55-80
-                if hammer and not (22 <= rv <= 42): continue
-                if star and not (58 <= rv <= 78): continue
-                if abs(C-e20)/C > 0.005: continue # era 0.006 -> 0.005
-                
-                # Aggiunto filtro EMA200 leggero
-                if hammer and C < e200*0.999: continue
-                if star and C > e200*1.001: continue
+                rv=float(df['rsi'].iloc[-1])
+                if hammer and not (21 <= rv <= 44): continue # medio
+                if star and not (56 <= rv <= 79): continue
+                if abs(C-float(df['ema20'].iloc[-1]))/C > 0.0055: continue
                 
                 cooldown[clean]=time.time(); stats["2M"]+=1
                 sig="CALL 📈" if hammer else "PUT 📉"
-                tipo="Hammer" if hammer else "Star"
                 chiusura = (datetime.now(ITALY) + timedelta(seconds=sec)).strftime("%H:%M:%S")
                 scadenza = (datetime.now(ITALY) + timedelta(seconds=sec+120)).strftime("%H:%M:%S")
-                msg=(
-                    f"⚡ <b>2M - TRA {int(sec)}s</b> ⚡\n"
-                    f"💱 {clean} {sig} {tipo} {forza:.0f}%\n"
-                    f"📍 Entry {(H+L)/2:.5f} Price {C:.5f}\n"
-                    f"⏰ Entra alle {chiusura} | Scad 2M alle {scadenza}\n"
-                    f"📊 RSI {rv:.0f} EMA20 {e20:.5f} ATR {atr_v:.5f}\n"
-                    f"🔒 Filtro 63% stretto un pelo\n"
-                    f"🕒 {ora_it()}"
-                )
-                send(msg)
+                send(f"⚡ <b>2M {int(sec)}s - {clean} {sig}</b> ⚡\n📍 {(H+L)/2:.5f} Forza {forza:.0f}% RSI {rv:.0f}\n⏰ Entra {chiusura} → Scad 2M {scadenza}\n🕒 {ora_it()}")
                 time.sleep(0.8)
-            time.sleep(15)
+            time.sleep(10)
         except Exception as e:
             print(f"ERR {e}"); time.sleep(10)
 
 threading.Thread(target=lavoro, daemon=True).start()
 app=Flask(__name__)
 @app.route('/')
-def home(): return f"2M 63% PELO | {stats['2M']} segnali | {ora_it()}"
+def home(): return f"2M MEDIO 61% | {stats['2M']} | {ora_it()}"
 if __name__=="__main__":
-    send(f"🚀 <b>STRETTO UN PELO</b>\nForza 63% RSI 22-42/58-78 ATR 0.60x\nDist EMA 0.5% + EMA200 filtro\n{ora_it()}")
+    send(f"🚀 <b>2M MEDIO 61% - EQUILIBRIO</b>\nForza 61% RSI 21-44/56-79\n{ora_it()}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
