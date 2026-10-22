@@ -1,4 +1,4 @@
-# bot.py - 55% BYPASS YAHOO 2m - MANDA SICURO ORA
+# bot.py - 56% LARGO CORRETTO - VIA DI MEZZO
 import os, time, threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -8,10 +8,10 @@ from flask import Flask
 
 TOKEN = os.getenv("TELEGRAM_TOKEN", os.getenv("TOKEN", ""))
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", ""))
-PAIRS = ["EURUSD=X","GBPUSD=X","GBPJPY=X","EURJPY=X","USDJPY=X","AUDJPY=X","EURGBP=X","USDCAD=X"]
+PAIRS = ["EURUSD=X","GBPUSD=X","GBPJPY=X","EURJPY=X","USDJPY=X","AUDJPY=X","EURGBP=X","USDCAD=X","USDCHF=X","AUDUSD=X"]
 ITALY = ZoneInfo("Europe/Rome")
 cooldown = {}; lock = threading.Lock()
-stats = {"2M":0, "yahoo_ok":0, "yahoo_fail":0}
+stats = {"2M":0}
 
 def ora_it(): return datetime.now(ITALY).strftime("%H:%M:%S")
 def rsi(s,p=14):
@@ -27,9 +27,8 @@ def secondi_chiusura():
         chiusura = now.replace(minute=prossimo, second=0, microsecond=0)
     return max(0, (chiusura - now).total_seconds())
 
-def get_df_bypass(sym):
-    # Prova 1m e 5m invece di 2m bannato
-    for interval in ["1m","5m","15m"]:
+def get_df(sym):
+    for interval in ["1m","5m"]:
         try:
             with lock:
                 url=f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval={interval}&range=2d"
@@ -38,14 +37,8 @@ def get_df_bypass(sym):
                 if j['chart']['result'] is None: continue
                 q=j['chart']['result'][0]['indicators']['quote'][0]
                 df=pd.DataFrame({'Open':q['open'],'High':q['high'],'Low':q['low'],'Close':q['close']}).dropna()
-                if len(df) < 10: continue
-                # Se 1m, prendi ultima candela come 2m
-                if interval == "1m":
-                    df = df.tail(120) # 2 ore
-                stats["yahoo_ok"]+=1
-                return df.tail(200)
+                if len(df)>=30: return df.tail(200)
         except: continue
-    stats["yahoo_fail"]+=1
     return pd.DataFrame()
 
 def send(m):
@@ -53,36 +46,37 @@ def send(m):
     except: pass
 
 def lavoro():
-    print("2M 55% BYPASS avviato", flush=True)
-    send(f"🚀 <b>2M 55% BYPASS YAHOO</b>\nUso 1m/5m se 2m bannato\nFiltro 55% largo - deve mandare\n{ora_it()}")
+    print("2M 56% avviato", flush=True)
+    send(f"🚀 <b>2M 56% - VIA DI MEZZO</b>\n56% corretto RSI ok\n{ora_it()}")
     while True:
         try:
             sec = secondi_chiusura()
-            if not (30 <= sec <= 90):
-                time.sleep(5); continue
+            if not (40 <= sec <= 80): time.sleep(5); continue
             for sym in PAIRS:
                 clean=sym.replace("=X","")
-                if clean in cooldown and time.time()-cooldown[clean]<180: continue
-                df=get_df_bypass(sym)
+                if clean in cooldown and time.time()-cooldown[clean]<200: continue
+                df=get_df(sym)
                 if len(df)<40: continue
                 df['rsi']=rsi(df['Close'])
                 c=df.iloc[-1]
                 O,H,L,C=float(c['Open']),float(c['High']),float(c['Low']),float(c['Close'])
                 total=H-L
-                if total==0: continue
+                if total<0.000018: continue
                 corpo=abs(O-C) or total*0.05; inf=min(O,C)-L; sup=H-max(O,C)
                 forza=max(inf,sup)/total*100
-                # 55% ULTRA LARGO - toglie tutti i blocchi
-                hammer=inf>=corpo*1.2 and inf>=total*0.38
-                star=sup>=corpo*1.2 and sup>=total*0.38
-                if not ((hammer or star) and 55<=forza<=95): continue
+                hammer=inf>=corpo*1.35 and inf>=total*0.41 and sup<=total*0.33
+                star=sup>=corpo*1.35 and sup>=total*0.41 and inf<=total*0.33
+                if not ((hammer or star) and 56<=forza<=93): continue
+                
                 rv=float(df['rsi'].iloc[-1])
-                if not (10 <= rv <= 90): continue
+                if hammer and not (16 <= rv <= 49): continue
+                if star and not (51 <= rv <= 84): continue
+                
                 cooldown[clean]=time.time(); stats["2M"]+=1
                 sig="CALL 📈" if hammer else "PUT 📉"
                 chiusura = (datetime.now(ITALY) + timedelta(seconds=sec)).strftime("%H:%M:%S")
                 scadenza = (datetime.now(ITALY) + timedelta(seconds=sec+120)).strftime("%H:%M:%S")
-                send(f"⚡ <b>2M {int(sec)}s - {clean} {sig}</b> ⚡\n💱 Forza {forza:.0f}% RSI {rv:.0f}\n📍 Price {C:.5f}\n⏰ Entra {chiusura} → Scad 2M {scadenza}\n✅ BYPASS 55% - FUNZIONA\n🕒 {ora_it()}")
+                send(f"⚡ <b>2M {int(sec)}s - {clean} {sig}</b> ⚡\n💱 Forza {forza:.0f}% RSI {rv:.0f}\n📍 Price {C:.5f}\n⏰ Entra {chiusura} → Scad 2M {scadenza}\n🎯 56%\n🕒 {ora_it()}")
             time.sleep(8)
         except Exception as e:
             print(f"ERR {e}"); time.sleep(10)
@@ -90,6 +84,6 @@ def lavoro():
 threading.Thread(target=lavoro, daemon=True).start()
 app=Flask(__name__)
 @app.route('/')
-def home(): return f"2M 55% BYPASS | OK {stats['yahoo_ok']} FAIL {stats['yahoo_fail']} SIG {stats['2M']} | {ora_it()}"
+def home(): return f"2M 56% | {stats['2M']} | {ora_it()}"
 if __name__=="__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
